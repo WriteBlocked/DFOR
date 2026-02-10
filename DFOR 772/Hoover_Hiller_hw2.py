@@ -5,7 +5,8 @@ version = '0.0'
 
 """ Change Log:
     01/27/2026: began writing file 
-    01/28/2026 restructured partition info method, created print_info method"""
+    01/28/2026 restructured partition info method, created print_info method
+    02/1/2026 verified output, submitted for grade"""
 
 import argparse
 import os
