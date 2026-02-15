@@ -60,7 +60,7 @@ def get_file_data(image_file, sector_size, sectors_per_cluster, hidden_sectors, 
     while int.from_bytes(image_file.read(1), byteorder='little') != int('0x80', 16):
         continue  # keep reading until we read a 0x80
 
-    #read filesize on disk and actual filesize.
+    #read file size on disk and actual file size.
     image_file.seek(39, 1)  # 39 b/c 40 less the one (0x80) we just read
     file_disk_size = int.from_bytes(image_file.read(8), byteorder='little')
     file_actual_size = int.from_bytes(image_file.read(8), byteorder='little')
@@ -77,7 +77,7 @@ def get_file_data(image_file, sector_size, sectors_per_cluster, hidden_sectors, 
     cluster_run_offset = int.from_bytes(image_file.read(cluster_run_offset_size), byteorder='little')
     # compute file start in bytes
     file_start = (cluster_run_offset * sectors_per_cluster * sector_size) + (hidden_sectors * sector_size)
-    return file_start, file_actual_size, file_disk_size  # NOTE: this is a good place for a breakpoint so you can check that the values are correct
+    return file_start, file_actual_size, file_disk_size
 
 def extract_slack(image_file, file_start, file_actual_size, file_disk_size, outfile):
     image_file.seek(file_start + file_actual_size)  # go to end of file;
