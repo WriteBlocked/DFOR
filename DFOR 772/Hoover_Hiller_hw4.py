@@ -28,16 +28,14 @@ def get_partition_offset(image_file):
     return partition_offset_sectors # in sectors
 
 def get_inode_offset(image_file,partition_offset,block_size,sector_size):
-    inode_table_offset_hi = (partition_offset * sector_size) + block_size + EDIT # see class 4 slide 16; (comment continued next lines)
-    # the value "(partition_offset * sector_size) + block_size" gets us to the start of sector 2056 in this image;
-    # how many bytes more until we get to the inode table UPPER 32 bits? (typo in the slide 16 image fixed in latest posted slides)
+    inode_table_offset_hi = (partition_offset * sector_size) + block_size + 8
     image_file.seek(inode_table_offset_hi)
-    inode_table_offset_hi_bytes = image_file.read(EDIT) # how many bytes in the inode table upper bits?
-    inode_table_offset_lo = (partition_offset * sector_size) + block_size + EDIT # see class 4 slide 16; (comment continued next lines)
-    # the value "(partition_offset * sector_size) + block_size" gets us to the start of sector 2056 in this image;
-    # how many bytes more until we get to the inode table LOWER 32 bits? (typo in the slide 16 image fixed in latest posted slides)
+
+    inode_table_offset_hi_bytes = image_file.read(4)
+    inode_table_offset_lo = (partition_offset * sector_size) + block_size + 40
     image_file.seek(inode_table_offset_lo)
-    inode_table_offset_lo_bytes = image_file.read(EDIT) # how many bytes in the inode table lower bits?
+    inode_table_offset_lo_bytes = image_file.read(4)
+
     inode_table_offset_blocks = int.from_bytes(inode_table_offset_lo_bytes + inode_table_offset_hi_bytes, byteorder='little') #intuitively, this should be hi + lo, but that doesn't work
     inode_table_offset_sectors = partition_offset + (inode_table_offset_blocks * int(block_size / sector_size))
     return inode_table_offset_sectors # in sectors
