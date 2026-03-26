@@ -167,15 +167,14 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    vector<string> args;
-    for (int i = 1; i < argc; i++) {
-        args.push_back(argv[i]);
-    }
-
     bool showHidden = false;
     bool recursive = false;
     bool showOwner = false;
 
+    string targetPath = "";
+    int argIndex = 1;
+
+    // Handle cd first
     if (string(argv[1]) == "cd") {
         if (argc < 3) {
             cerr << "cd requires argument\n";
@@ -185,18 +184,28 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    for (int i = 1; i < argc; i++) {
+    // Check if first argument is a directory
+    if (fs::exists(argv[1]) && fs::is_directory(argv[1])) {
+        targetPath = argv[1];
+        argIndex = 2; // flags start after path
+    }
+    else {
+        // Default to current directory
+        char buffer[MAX_PATH];
+        GetCurrentDirectoryA(MAX_PATH, buffer);
+        targetPath = buffer;
+    }
+
+    // Parse flags
+    for (int i = argIndex; i < argc; i++) {
         string arg = argv[i];
         if (arg == "/a") showHidden = true;
         else if (arg == "/s") recursive = true;
         else if (arg == "/q") showOwner = true;
     }
 
-    char buffer[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, buffer);
-
-    cout << "Directory of " << buffer << "\n\n";
-    ListDirectory(buffer, showHidden, recursive, showOwner);
+    cout << "Directory of " << targetPath << "\n\n";
+    ListDirectory(targetPath, showHidden, recursive, showOwner);
 
     return 0;
 }
