@@ -1,4 +1,5 @@
-This tool, FileEx, has the functionality of the following commands:
+## This tool, FileEx was made by Hiller Hoover for the midterm of the DFOR 740 in the Spring 2026 semester at George Mason Universityr.
+## FileEx has the functionality of the following commands:
 - dir (ls on linux)
 - pwd
 - cd
