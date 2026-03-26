@@ -184,9 +184,19 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Check if first argument is a directory
-    if (fs::exists(argv[1]) && fs::is_directory(argv[1])) {
-        targetPath = argv[1];
+    // Check if first argument is a directory (including ., .., relative paths)
+    if (argv[1][0] != '/' && fs::exists(argv[1]) && fs::is_directory(argv[1])) {
+
+        // Change directory FIRST (like cd behavior)
+        if (!SetCurrentDirectoryA(argv[1])) {
+            cerr << "Failed to change directory.\n";
+            return 1;
+        }
+
+        char buffer[MAX_PATH];
+        GetCurrentDirectoryA(MAX_PATH, buffer);
+        targetPath = buffer;
+
         argIndex = 2; // flags start after path
     }
     else {
