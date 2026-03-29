@@ -159,7 +159,7 @@ void ChangeDirectory(const string& target) {
 
 // Entry point
 int main(int argc, char* argv[]) {
-    // No args → pwd behavior
+    // No args → pwd
     if (argc == 1) {
         char buffer[MAX_PATH];
         GetCurrentDirectoryA(MAX_PATH, buffer);
@@ -172,46 +172,60 @@ int main(int argc, char* argv[]) {
     bool showOwner = false;
 
     string targetPath = "";
-    int argIndex = 1;
+    bool didCD = false;
 
-    // Handle cd first
-    if (string(argv[1]) == "cd") {
-        if (argc < 3) {
-            cerr << "cd requires argument\n";
-            return 1;
-        }
-        ChangeDirectory(argv[2]);
-        return 0;
-    }
+    // Default to current directory
+    char buffer[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, buffer);
+    targetPath = buffer;
 
-    // Check if first argument is a directory (including ., .., relative paths)
-    if (argv[1][0] != '/' && fs::exists(argv[1]) && fs::is_directory(argv[1])) {
-
-        // Change directory FIRST (like cd behavior)
-        if (!SetCurrentDirectoryA(argv[1])) {
-            cerr << "Failed to change directory.\n";
-            return 1;
-        }
-
-        char buffer[MAX_PATH];
-        GetCurrentDirectoryA(MAX_PATH, buffer);
-        targetPath = buffer;
-
-        argIndex = 2; // flags start after path
-    }
-    else {
-        // Default to current directory
-        char buffer[MAX_PATH];
-        GetCurrentDirectoryA(MAX_PATH, buffer);
-        targetPath = buffer;
-    }
-
-    // Parse flags
-    for (int i = argIndex; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         string arg = argv[i];
-        if (arg == "/a") showHidden = true;
+
+        // --- cd as a flag ---
+        if (arg == "cd") {
+            if (i + 1 >= argc) {
+                cerr << "cd requires a path\n";
+                return 1;
+            }
+
+            string path = argv[i + 1];
+
+            if (!SetCurrentDirectoryA(path.c_str())) {
+                cerr << "Failed to change directory.\n";
+                return 1;
+            }
+
+            GetCurrentDirectoryA(MAX_PATH, buffer);
+            targetPath = buffer;
+
+            didCD = true;
+            i++; // skip next argument (path)
+        }
+
+        // --- flags ---
+        else if (arg == "/a") showHidden = true;
         else if (arg == "/s") recursive = true;
         else if (arg == "/q") showOwner = true;
+
+        // --- implicit directory (like earlier behavior) ---
+        else if (arg[0] != '/' && fs::exists(arg) && fs::is_directory(arg)) {
+            if (!SetCurrentDirectoryA(arg.c_str())) {
+                cerr << "Failed to change directory.\n";
+                return 1;
+            }
+
+            GetCurrentDirectoryA(MAX_PATH, buffer);
+            targetPath = buffer;
+
+            didCD = true;
+        }
+    }
+
+    // If ONLY cd was used, don't list (match real cd behavior)
+    if (didCD && argc <= 3) {
+        cout << "Current Directory: " << targetPath << endl;
+        return 0;
     }
 
     cout << "Directory of " << targetPath << "\n\n";
