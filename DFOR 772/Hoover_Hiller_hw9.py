@@ -1,12 +1,12 @@
 ''' DFOR 772
-    EDIT (your name) '''
+    Hiller Hoover '''
 
 # search for encoded versions of a search string: base64, unicode UTF-16 little endian (2 byte ASCII), IP address in hex, big endian
 
 ''' Change Log:
     12/30/24: version 1.0
     3/25/25: version 1.1; adapted for homework exercise
-    EDIT as appropriate
+    3/30/25 Added lowercase/uppercase argument
 '''
 
 # module imports
@@ -58,6 +58,16 @@ def convert_little_endian(search):
     print(f'Converted (to little endian): {search_converted} (hex: {search_converted.hex()})')
     return search_converted
 
+def convert_uppercase(search):
+    search_converted = search.upper().encode('utf-8')
+    print(f'Converted (to uppercase): {search_converted}')
+    return search_converted
+
+def convert_lowercase(search):
+    search_converted = search.lower().encode('utf-8')
+    print(f'Converted (to lowercase): {search_converted}')
+    return search_converted
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description=f'DFOR 772 encoded data searcher, version {version}')
     parser.add_argument("-i", "--image",
@@ -67,7 +77,7 @@ def parse_arguments():
                         help="search term",
                         required=True)
     parser.add_argument("-e", "--encoding",
-                        help="encoding (b=base64, u=utf-16, i=ip address, l=(el)little endian)",
+                        help="encoding (b=base64, u=utf-16, i=ip address, l=(el)little endian), C=uppercase, c=lowercase",
                         required=True)
     return parser.parse_args()
 
@@ -84,6 +94,10 @@ def main():
             search_converted = convert_ipaddress(args.search)
         case 'l':
             search_converted = convert_little_endian(args.search)
+        case 'C':
+            search_converted = convert_uppercase(args.search)
+        case 'c':
+            search_converted = convert_lowercase(args.search)
         case _:
             print(f'Invalid encoding argument; exiting.')
             exit()
