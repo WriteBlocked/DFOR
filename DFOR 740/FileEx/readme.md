@@ -2,6 +2,7 @@
 This tool recreates the functionality of dir/ls, pwd, and cd.
 
 This tool was made by Hiller Hoover for the midterm of the DFOR 740 in the Spring 2026 semester at George Mason University.
+
 ## Usage
 ```
 FileEx.exe 
