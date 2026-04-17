@@ -2,7 +2,7 @@
 
 
 
-You are working inside a multi-project repository. Only operate inside the current project folder.
+You are working inside a multi-project repository. Only operate inside the current project folder. Place compiled code at the top level of the folder.
 
 
 

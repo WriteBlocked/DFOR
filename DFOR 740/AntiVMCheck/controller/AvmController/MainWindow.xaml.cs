@@ -101,6 +101,24 @@ namespace AvmController
             RulesList.Items.Add($"Redirect: {match} -> {redirect}");
         }
 
+        private void RemoveRuleButton_Click(object sender, RoutedEventArgs e)
+        {
+            var index = RulesList.SelectedIndex;
+            if (index < 0 || index >= _fileRules.Count)
+            {
+                return;
+            }
+
+            _fileRules.RemoveAt(index);
+            RulesList.Items.RemoveAt(index);
+        }
+
+        private void ClearRulesButton_Click(object sender, RoutedEventArgs e)
+        {
+            _fileRules.Clear();
+            RulesList.Items.Clear();
+        }
+
         private void ApplyPolicyButton_Click(object sender, RoutedEventArgs e)
         {
             var policy = BuildPolicy();

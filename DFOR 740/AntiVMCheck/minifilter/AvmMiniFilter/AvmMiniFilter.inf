@@ -42,8 +42,8 @@ AddReg         = MiniFilter.AddRegistry
 
 [MiniFilter.AddRegistry]
 HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
-HKR,"Instances\"%DefaultInstance%,"Altitude",0x00000000,%Altitude%
-HKR,"Instances\"%DefaultInstance%,"Flags",0x00010001,0
+HKR,"Instances\%DefaultInstance%","Altitude",0x00000000,%Altitude%
+HKR,"Instances\%DefaultInstance%","Flags",0x00010001,0
 
 [DriverCopyFiles]
 AvmMiniFilter.sys

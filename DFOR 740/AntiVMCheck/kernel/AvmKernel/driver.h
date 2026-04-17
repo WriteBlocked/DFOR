@@ -7,6 +7,7 @@
 typedef struct _AVM_KERNEL_STATE {
     FAST_MUTEX Guard;
     PDEVICE_OBJECT DeviceObject;
+    LARGE_INTEGER RegistryCallbackCookie;
     AVM_POLICY Policy;
     AVM_TARGET_ENTRY Targets[AVM_MAX_TARGETS];
     ULONG TargetCount;

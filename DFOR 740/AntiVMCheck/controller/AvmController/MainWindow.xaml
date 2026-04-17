@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Anti-VM Countermeasure Controller"
         Height="820"
-        Width="1320">
+        Width="1400">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -79,12 +79,18 @@
             <GroupBox Header="File Rules" Grid.Column="2">
                 <DockPanel Margin="8">
                     <StackPanel DockPanel.Dock="Top">
-                        <TextBox x:Name="MatchPathText" Margin="0,0,0,8" />
-                        <TextBox x:Name="RedirectPathText" Margin="0,0,0,8" />
+                        <TextBlock Text="Path to hide or redirect:" FontSize="11" Foreground="Gray" Margin="0,0,0,2" />
+                        <TextBox x:Name="MatchPathText" Margin="0,0,0,8" ToolTip="e.g. C:\Windows\System32\drivers\vmci.sys" />
+                        <TextBlock Text="Redirect target (optional, for redirect rules only):" FontSize="11" Foreground="Gray" Margin="0,0,0,2" />
+                        <TextBox x:Name="RedirectPathText" Margin="0,0,0,8" ToolTip="e.g. C:\Windows\System32\drivers\dummy.sys" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <Button Width="120" Margin="0,0,8,0" Content="Add Hide Rule" Click="AddHideRuleButton_Click" ToolTip="Makes the file appear nonexistent" />
+                            <Button Width="140" Margin="0,0,8,0" Content="Add Redirect Rule" Click="AddRedirectRuleButton_Click" ToolTip="Redirects file access to a different path" />
+                            <Button Width="120" Margin="0,0,8,0" Content="Remove Selected" Click="RemoveRuleButton_Click" ToolTip="Remove the selected rule from the list" />
+                            <Button Width="100" Content="Clear Rules" Click="ClearRulesButton_Click" ToolTip="Remove all custom file rules" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Button Width="140" Margin="0,0,8,0" Content="Add Hide Rule" Click="AddHideRuleButton_Click" />
-                            <Button Width="160" Margin="0,0,8,0" Content="Add Redirect Rule" Click="AddRedirectRuleButton_Click" />
-                            <Button Width="140" Content="Export Logs" Click="ExportLogsButton_Click" />
+                            <Button Width="120" Content="Export Logs" Click="ExportLogsButton_Click" />
                         </StackPanel>
                     </StackPanel>
                     <ListBox x:Name="RulesList" Margin="0,12,0,0" />

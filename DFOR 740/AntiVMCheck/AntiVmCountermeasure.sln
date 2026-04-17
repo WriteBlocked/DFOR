@@ -10,6 +10,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AvmRuntimeShim", "runtime\A
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvmController", "controller\AvmController\AvmController.csproj", "{B630AC28-E3A2-4BEA-8C0D-67D0DC6BFA50}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AvmProbeTest", "probe\AvmProbeTest\AvmProbeTest.vcxproj", "{E9A1C3D2-5F47-4B8E-A6D1-7C3E9F2B4A05}"
+EndProject
 Global
     GlobalSection(SolutionConfigurationPlatforms) = preSolution
         Debug|x64 = Debug|x64
@@ -32,6 +34,10 @@ Global
         {B630AC28-E3A2-4BEA-8C0D-67D0DC6BFA50}.Debug|x64.Build.0 = Debug|AnyCPU
         {B630AC28-E3A2-4BEA-8C0D-67D0DC6BFA50}.Release|x64.ActiveCfg = Release|AnyCPU
         {B630AC28-E3A2-4BEA-8C0D-67D0DC6BFA50}.Release|x64.Build.0 = Release|AnyCPU
+        {E9A1C3D2-5F47-4B8E-A6D1-7C3E9F2B4A05}.Debug|x64.ActiveCfg = Debug|x64
+        {E9A1C3D2-5F47-4B8E-A6D1-7C3E9F2B4A05}.Debug|x64.Build.0 = Debug|x64
+        {E9A1C3D2-5F47-4B8E-A6D1-7C3E9F2B4A05}.Release|x64.ActiveCfg = Release|x64
+        {E9A1C3D2-5F47-4B8E-A6D1-7C3E9F2B4A05}.Release|x64.Build.0 = Release|x64
     EndGlobalSection
     GlobalSection(SolutionProperties) = preSolution
         HideSolutionNode = FALSE
