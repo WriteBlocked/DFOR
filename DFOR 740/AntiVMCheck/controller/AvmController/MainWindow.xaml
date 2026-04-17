@@ -1,0 +1,111 @@
+<Window x:Class="AvmController.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Anti-VM Countermeasure Controller"
+        Height="820"
+        Width="1320">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <GroupBox Header="Driver Status" Margin="0,0,0,12">
+            <Grid Margin="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock x:Name="KernelStatusText" FontWeight="SemiBold" Text="Kernel: disconnected" />
+                    <TextBlock x:Name="KernelMetricsText" Text="Targets: 0  Events: 0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock x:Name="FilterStatusText" FontWeight="SemiBold" Text="Minifilter: disconnected" />
+                    <TextBlock x:Name="FilterMetricsText" Text="Rules: 0  Events: 0" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Width="120" Margin="0,0,8,0" Content="Refresh" Click="RefreshButton_Click" />
+                    <Button Width="160" Content="Apply Policy" Click="ApplyPolicyButton_Click" />
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Header="Targets" Margin="0,0,12,0">
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top">
+                        <ComboBox x:Name="TargetKindCombo" SelectedIndex="0" Margin="0,0,0,8">
+                            <ComboBoxItem Content="PID" />
+                            <ComboBoxItem Content="Image Name" />
+                            <ComboBoxItem Content="Image Path Prefix" />
+                        </ComboBox>
+                        <TextBox x:Name="TargetValueText" Margin="0,0,0,8" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Width="140" Margin="0,0,8,0" Content="Add Target" Click="AddTargetButton_Click" />
+                            <Button Width="140" Content="Inject Shim" Click="InjectShimButton_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                    <ListBox x:Name="TargetsList" Margin="0,12,0,0" />
+                </DockPanel>
+            </GroupBox>
+
+            <GroupBox Header="Modes and Checks" Grid.Column="1" Margin="0,0,12,0">
+                <StackPanel Margin="8">
+                    <ComboBox x:Name="ModeCombo" SelectedIndex="1" Margin="0,0,0,12">
+                        <ComboBoxItem Content="Observe" />
+                        <ComboBoxItem Content="Selective Concealment" />
+                        <ComboBoxItem Content="Full Concealment" />
+                    </ComboBox>
+                    <CheckBox x:Name="DebuggerCheck" Content="Debugger concealment" IsChecked="True" />
+                    <CheckBox x:Name="TimingCheck" Content="Timing normalization" IsChecked="True" />
+                    <CheckBox x:Name="NativeApiCheck" Content="Native API monitoring" IsChecked="True" />
+                    <CheckBox x:Name="ProcessEnumCheck" Content="Process/tool concealment" IsChecked="True" />
+                    <CheckBox x:Name="DriverProbeCheck" Content="Driver/device probe filtering" IsChecked="True" />
+                    <CheckBox x:Name="RegistryCheck" Content="Registry artifact hiding" IsChecked="True" />
+                    <CheckBox x:Name="FileCheck" Content="File artifact hiding" IsChecked="True" />
+                    <CheckBox x:Name="DirectoryCheck" Content="Directory listing filtering" IsChecked="True" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="File Rules" Grid.Column="2">
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBox x:Name="MatchPathText" Margin="0,0,0,8" />
+                        <TextBox x:Name="RedirectPathText" Margin="0,0,0,8" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Width="140" Margin="0,0,8,0" Content="Add Hide Rule" Click="AddHideRuleButton_Click" />
+                            <Button Width="160" Margin="0,0,8,0" Content="Add Redirect Rule" Click="AddRedirectRuleButton_Click" />
+                            <Button Width="140" Content="Export Logs" Click="ExportLogsButton_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                    <ListBox x:Name="RulesList" Margin="0,12,0,0" />
+                </DockPanel>
+            </GroupBox>
+        </Grid>
+
+        <GroupBox Grid.Row="2" Header="Telemetry">
+            <DataGrid x:Name="TelemetryGrid" AutoGenerateColumns="False" IsReadOnly="True" ItemsSource="{Binding Telemetry}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="160" />
+                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="90" />
+                    <DataGridTextColumn Header="Type" Binding="{Binding EventType}" Width="140" />
+                    <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="70" />
+                    <DataGridTextColumn Header="TID" Binding="{Binding ThreadId}" Width="70" />
+                    <DataGridTextColumn Header="Mechanism" Binding="{Binding Mechanism}" Width="160" />
+                    <DataGridTextColumn Header="Original" Binding="{Binding OriginalText}" Width="200" />
+                    <DataGridTextColumn Header="Spoofed" Binding="{Binding SpoofedText}" Width="200" />
+                    <DataGridTextColumn Header="Image" Binding="{Binding ImagePath}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+    </Grid>
+</Window>
