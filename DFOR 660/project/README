@@ -1,0 +1,16 @@
+Documentation for "response"
+
+This script was made by Hiller Hoover for DFOR 660 in the Fall 2024 semester at GMU.
+
+This flash drive is designed to be plugged into an Ubuntu 24 system, to have the response script run as root, and then to send it's output to /data on the flash drive.
+Please run the script as root and follow along with the on-screen instructions.
+The /data folder will contain a wealth of forensically valuable data, but it should not be analyzed on the target machine.
+
+After use, unmount the flash drive with the umount command, and then analyze the information on another computer (preferably linux).
+It is reccommended to use the tar command to zip all of the /data folder off of the collection flash drive.
+Afterwards, you should remove or rename the /data folder. This will prepare the flash drive for it's next use.
+
+If you have any questions about the functionality or design philosophy of this script, I can be reached at:
+
+hhoover.net
+linkedin.com/in/hiller-hoover

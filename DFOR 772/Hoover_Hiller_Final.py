@@ -38,9 +38,11 @@ __artifacts_v2__ = {
 }
 
 """
-This is a 
-Version history:
+This is a Telegram Parser for Android. It is made by Hiller Hoover for DFOR 772 in the Spring 2026 semester at GMU.
+This file is a duplicate of the latest version, available at: 
+https://github.com/WriteBlocked/ALEAPP/blob/telegram-parser/scripts/artifacts/Telegram.py
 
+Version history:
 4/6/2026: Cloned aLEAPP, set up pycharm for editing. started creating functions.
 4/7/2026: added userconfing.xml parsing.  
 4/9/2026: added primitives for TLObject parsing.

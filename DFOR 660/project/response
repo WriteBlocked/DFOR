@@ -1,0 +1,175 @@
+#!/bin/bash
+
+#Forensics collection script by Hiller Hoover
+#Run this script from it's root directory
+#Read the response readme file
+
+if [ "$EUID" -ne 0 ]; then
+  echo "This script must be run as root or with sudo."
+  exit 1
+fi
+
+clear
+echo "This program captures the required volatile and non-volatile forensic data from an Ubuntu 24 system."
+read -p "Do you want to continue? (y/n) " answer
+
+case $answer in
+y|Y|YES|yes|Yes) echo "";;
+n|N|NO|no|No) exit;;
+*) echo "Please respond with (y/n)";read -p "Press any key to exit"; clear; exit;;
+esac
+
+read -p "Investigator Name: " investigator_name
+read -p "Case Name: " case_name
+read -p "Date: " case_date
+read -p "Time: " case_time
+
+#get the path of the drive as path for the tools
+location="$(dirname "$(realpath "$0")")"
+computer_time=`date`
+
+read -p "What type of device are you storing data on? " collect_type
+read -p "What is the serial number of this device? " serial_number
+
+#read -p "What folder are you going to store the collection in? " collection_location
+
+collection_location=data
+if [ -d ./$collection_location ];
+then 
+	echo "Please rename, remove, or compress the /data directory. This script will now exit."
+	exit
+else
+	mkdir $location/$collection_location
+fi
+echo "Writing to $collection_location"
+
+echo "Beginning data collection"
+echo "Recording date and time"
+echo "Trusted tool date/time:" >> $location/$collection_location/$case_name.dat
+$location/tools/date >> $location/$collection_location/$case_name.dat
+
+echo "The investigator is $investigator_name" >> $location/$collection_location/$case_name.dat
+echo "Device Storage Type is $collect_type" >> $location/$collection_location/$case_name.dat
+echo "Device Serial Number is: $serial_number" >> $location/$collection_location/$case_name.dat
+
+echo "Computer time: $computer_time" >> $location/$collection_location/$case_name.dat
+echo "Investigator date/time: $case_date $case_time" >> $location/$collection_location/$case_name.dat
+
+echo "Recording Hostname"
+$location/tools/hostname >> $location/$collection_location/$case_name.hostname
+
+echo "Recording System Messages"
+$location/tools/dmesg >> $location/$collection_location/$case_name.dmesg
+
+echo "Recording Directory Info"
+
+$location/tools/ls / -alhr >> $location/$collection_location/$case_name.directory 2>>/$location/$collection_location/$case_name.directory.err
+
+echo "Recording Active Users"
+$location/tools/w >> $location/$collection_location/$case_name.w
+
+echo "Recording Open Files"
+#redirecting errors because open files error out
+$location/tools/lsof -n 2>/dev/null >> $location/$collection_location/$case_name.lsof
+
+echo "Recording Mounted Devices"
+$location/tools/mount >> $location/$collection_location/$case_name.mount
+
+echo "Recording ARP Cache"
+$location/tools/arp -a >> $location/$collection_location/$case_name.arp
+
+echo "Recording Filesystem Space Usage"
+$location/tools/df -ahT >> $location/$collection_location/$case_name.df
+
+echo "Recording Information about Storage Devices"
+$location/tools/fdisk -l >> $location/$collection_location/$case_name.fdisk
+
+echo "Recording Network Interfaces"
+$location/tools/ifconfig >> $location/$collection_location/$case_name.ifconfig
+
+echo "Recording IP Route"
+$location/tools/ip route >> $location/$collection_location/$case_name.ip.route
+
+echo "Recording IP packet error information"
+$location/tools/ip -s -s link ls >> $location/$collection_location/$case_name.ip.errors
+
+echo "Recording Wireless Adapters"
+$location/tools/iwconfig &> $location/$collection_location/$case_name.iwconfig
+
+echo "Recording Kernel Modules"
+$location/tools/lsmod >> $location/$collection_location/$case_name.lsmod
+
+echo "Recording PIDs for each Socket"
+$location/tools/netstat -anp >> $location/$collection_location/$case_name.netstat
+
+echo "Recording Process Information"
+$location/tools/ps -eFH >> $location/$collection_location/$case_name.ps
+
+echo "Recording Kernel Information"
+$location/tools/uname -a >> $location/$collection_location/$case_name.uname
+
+echo "Recording Logged On Users"
+$location/tools/who >> $location/$collection_location/$case_name.who
+
+echo "Copying all saved history from root (logged out sessions only)"
+$location/tools/mkdir $location/$collection_location/history
+$location/tools/cp /root/.bash_history $location/$collection_location/history/root.history
+
+echo "Recording History from logged out users"
+# Check if /home directory is empty, need to figure out how to make this work with ls from /tools
+if [ -z "$(ls -A /home)" ]; then
+    echo "No history from logged out users found"
+else
+    # Process each user directory in /home
+    for a in /home/* ; do
+        username=$(basename "$a")
+	#need to import username & basename into /tools
+        user_history_file="$location/$collection_location/history/${username}_bash_history"
+
+        # Check if .bash_history exists in the user's directory
+        if [ -f "$a/.bash_history" ]; then
+            # Copy the .bash_history to the user's history file
+            $location/tools/cp "$a/.bash_history" "$user_history_file"
+            echo "History for $username has been copied to $user_history_file"
+        else
+            echo "No .bash_history found for $username"
+        fi
+
+    done
+fi
+
+echo "Copying Scheduled Jobs"
+$location/tools/mkdir $location/$collection_location/cron
+$location/tools/cp -r /etc/cron* $location/$collection_location/cron
+
+echo "Copying Logs"
+$location/tools/cp -r 2>/dev/null /var/log* $location/$collection_location/logs
+
+echo "Copying Passwd file"
+$location/tools/cp /etc/passwd $location/$collection_location/$case_name.passwd
+
+echo "Copying DNS Cache"
+$location/tools/cp /etc/resolv.conf $location/$collection_location/$case_name.resolv
+
+echo "Copying Static DNS Records"
+$location/tools/cp /etc/hosts $location/$collection_location/$case_name.hosts
+
+echo "Finding login Records"
+$location/tools/last >> $location/$collection_location/$case_name.last
+
+echo "Finding last failed logins"
+$location/tools/lastb >> $location/$collection_location/$case_name.lastb
+
+echo "Finding last login of each user"
+$location/tools/lastlog 2>/dev/null >> $location/$collection_location/$case_name.lastlog
+
+echo "The Script is now finished. Have a good day."
+
+#TODO:
+#fix username & basename to use /tools/*
+#make collection location accept answer with spaces
+#remove redundant ip error collection, this infor is collected with ifconfig
+
+
+##extra credit: hash every file, take results on every new line of a hash file and then move it into the collection folder after being run
+##use sha256sum
