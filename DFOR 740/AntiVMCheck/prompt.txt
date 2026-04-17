@@ -1,0 +1,198 @@
+You are building a complete, runnable MVP for an Anti-VM-Awareness Countermeasure Platform inside the CURRENT working directory only.
+
+Reference document:
+- PROJECT_SPEC.md
+
+STRICT OPERATING RULES:
+- Do NOT request access outside the current working directory.
+- Do NOT reference parent directories, home folders, or external repositories.
+- Assume all required files must exist in or be created within this project folder.
+- If something is missing or ambiguous, make the simplest reasonable implementation decision and continue.
+- Do NOT stop to ask for clarification unless completely blocked.
+
+PRIMARY GOAL:
+Build a working prototype that reduces malware awareness of virtualized or instrumented environments by detecting and interfering with anti-analysis and anti-VM behavior.
+
+MANDATORY DELIVERABLES:
+You MUST produce the following working components:
+
+1. User-mode controller program with GUI
+2. KMDF Kernel-mode driver (ring 0)
+3. Windows file system minifilter driver
+
+All three components must:
+- Compile successfully
+- Integrate together
+- Support communication between user mode and kernel components (IOCTL or equivalent)
+- Demonstrate meaningful anti-VM / anti-analysis countermeasure behavior
+
+PRIORITY ORDER:
+1. Kernel driver functionality (ring 0)
+2. Minifilter driver functionality
+3. User-mode GUI controller and telemetry interface
+
+COVERAGE REQUIREMENT:
+Do NOT implement only one narrow proof-of-concept countermeasure and stop.
+The objective is to satisfy as MANY of the project goals and detection/concealment categories as reasonably possible within an MVP.
+Prioritize breadth of meaningful functionality across the listed objectives, while keeping the system runnable and realistic.
+If some objectives cannot be fully implemented, implement partial support where practical rather than omitting them entirely.
+
+TARGET FUNCTIONAL COVERAGE:
+Implement as much of the following as feasible:
+
+Kernel driver:
+- Track target processes
+- Detect debugger checks
+- Detect timing checks
+- Detect native API usage relevant to anti-analysis
+- Detect process/module/tool enumeration attempts
+- Detect driver/device probing where practical
+- Generate telemetry events
+- Implement selective spoofing or concealment where feasible
+- Support operating modes:
+  - Observe
+  - Selective concealment
+  - Full concealment
+
+Minifilter driver:
+- Intercept file system operations
+- Hide or redirect VM- or sandbox-related artifacts
+- Filter directory listings
+- Implement as many of the following as feasible:
+  - return not found
+  - redirect to benign file
+  - remove entries from directory listings
+
+User-mode GUI program:
+- Provide a graphical interface, not just a CLI
+- Communicate with drivers
+- Register and manage target processes
+- Display telemetry/events
+- Load and manage policies
+- Allow the operator to enable or disable specific countermeasure checks individually
+- Allow mode selection:
+  - Log-only / Observe
+  - Selective spoofing / concealment
+  - Full concealment
+- Export logs in JSON or CSV
+
+GUI REQUIREMENTS:
+The user-mode controller must provide a usable GUI that includes as many of the following as practical:
+- status of loaded drivers
+- target process management
+- list of countermeasure categories with per-check enable/disable toggles
+- mode selection controls
+- telemetry/event viewer
+- log export controls
+- basic policy/rule management
+
+COUNTERMEASURE CONTROL REQUIREMENT:
+The operator must be able to selectively enable or disable specific checks or concealment behaviors individually, not only switch a single global mode.
+Examples include categories such as:
+- debugger concealment
+- timing normalization
+- native API filtering
+- process/tool concealment
+- file artifact hiding
+- directory listing filtering
+
+SYSTEM REQUIREMENTS:
+- Per-process targeting by PID, image name, or path where practical
+- Event logging with key fields such as:
+  - PID / TID
+  - image path
+  - event type
+  - API/mechanism
+  - original result
+  - spoofed result
+  - timestamp
+- Basic policy behavior supporting log / spoof / hide / redirect where practical
+- Safe fallback behavior if controller is missing
+- Reasonable batching/caching where useful, but do not overengineer
+
+IMPLEMENTATION RULES:
+- Favor working code over perfect architecture
+- Do NOT leave core features as stubs
+- Keep dependencies minimal and practical
+- Avoid overengineering
+- Keep structure modular but simple
+- Prefer implementable Windows-native choices for the drivers and GUI
+- If a feature is too complex to complete fully, implement the simplest usable version instead of skipping it
+
+MANDATORY WORKFLOW:
+
+PHASE 1 — DISCOVERY
+- Read PROJECT_SPEC.md
+- Inspect repository contents
+- Identify the required build system and project structure
+- Identify how the user-mode program, kernel driver, and minifilter will communicate
+- Identify the highest-value objectives to implement first while still maximizing total coverage
+
+PHASE 2 — PLANNING
+- Create IMPLEMENTATION_PLAN.md
+- Break work into phases aligned with:
+  - kernel driver
+  - minifilter driver
+  - user-mode GUI controller
+  - integration
+  - validation
+- Explicitly map planned work to the project objectives so coverage is clear
+- Prioritize maximizing the number of objectives met, not minimizing scope to a single demo
+
+PHASE 3 — CORE BUILD (KERNEL FIRST)
+- Implement kernel driver skeleton first
+- Add telemetry and detection coverage across as many categories as practical
+- Add multiple concealment/spoofing mechanisms where feasible
+- Build for extensibility so additional checks can be toggled from user mode
+
+PHASE 4 — FILE SYSTEM CONTROL
+- Implement minifilter driver
+- Add artifact hiding, directory filtering, and redirection support where practical
+
+PHASE 5 — USER-MODE GUI
+- Implement the GUI controller
+- Add driver communication
+- Add controls for:
+  - registering targets
+  - selecting mode
+  - enabling/disabling specific countermeasures
+  - viewing telemetry
+  - exporting logs
+
+PHASE 6 — INTEGRATION
+- Ensure all components work together
+- Validate data flow from kernel/minifilter to user mode
+- Validate that GUI control settings affect driver behavior
+
+PHASE 7 — VALIDATION
+- Confirm project builds successfully
+- Demonstrate multiple implemented objectives, not just one
+- Demonstrate:
+  - detection events
+  - at least several distinct concealment/countermeasure behaviors
+  - GUI-based enabling/disabling of specific checks
+- Create README.md with:
+  - architecture overview
+  - build steps
+  - driver loading instructions
+  - usage instructions
+  - GUI overview
+  - examples
+  - limitations and unimplemented objectives
+
+SUCCESS CONDITION:
+Success means delivering a broad, working MVP that covers as many project objectives as possible across the kernel driver, minifilter, and GUI controller.
+Do not optimize for the smallest possible demo. Optimize for the broadest realistic MVP that still builds and runs.
+
+OUTPUT BEHAVIOR:
+- Focus on implementation, not long explanations
+- After each major phase, summarize:
+  - files created or modified
+  - which objectives are now covered
+  - what works
+  - next step
+
+START NOW:
+1. Read PROJECT_SPEC.md
+2. Create IMPLEMENTATION_PLAN.md
+3. Begin with kernel driver implementation immediately
