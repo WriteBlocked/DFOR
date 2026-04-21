@@ -272,8 +272,8 @@ function Export-CodeSigningCert {
         [string]$Password
     )
 
-    $cerPath = Join-Path $RepoRoot "HillerTestDriver.cer"
-    $pfxPath = Join-Path $RepoRoot "HillerTestDriver.pfx"
+    $cerPath = Join-Path $ScriptDir "HillerTestDriver.cer"
+    $pfxPath = Join-Path $ScriptDir "HillerTestDriver.pfx"
     $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
 
     Export-Certificate -Cert $Cert.PSPath -FilePath $cerPath -Force | Out-Null
@@ -440,7 +440,7 @@ function Spoof-MacAddress {
     Write-Step "Spoofing MAC address"
 
     # VMware OUI prefixes to look for
-    $vmOuis = @("00-0C-29", "00-50-56", "00-05-69", "00-1C-14")
+    $vmOuis = @("00-0C-29", "00-50-56", "00-05-69", "00-1C-14", "08-00-27")
     $vmAdapters = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
         $mac = $_.MacAddress
         $vmOuis | Where-Object { $mac.StartsWith($_) }
@@ -599,17 +599,49 @@ function Warn-AnalysisTools {
     Write-Step "Checking for analysis tools"
 
     $toolProcesses = @(
+        # Sysinternals
         "procmon", "procmon64", "Procmon",
         "procexp", "procexp64",
+        "autoruns", "autoruns64",
+        "tcpview", "tcpview64",
+        "Sysmon", "Sysmon64",
+        "handle", "handle64",
+        "listdlls", "listdlls64",
+        "vmmap", "vmmap64",
+        "strings", "strings64",
+        "accesschk", "accesschk64",
+        # Network capture
         "wireshark", "dumpcap", "tshark",
+        "fiddler", "NetworkMiner", "rawcap",
+        "HttpAnalyzerStdV7", "SmartSniff",
+        # Disassemblers / Decompilers
         "ida", "ida64", "idaq", "idaq64",
-        "x64dbg", "x32dbg", "ollydbg",
-        "windbg", "kd", "cdb",
         "ghidra", "ghidraRun",
-        "fiddler", "HttpAnalyzerStdV7",
-        "pestudio", "peid", "die",
+        "r2", "radare2", "cutter", "iaito",
+        "binaryninja", "hopper",
+        # Debuggers
+        "x64dbg", "x32dbg", "ollydbg",
+        "windbg", "kd", "cdb", "ntsd",
+        "dnSpy", "dotPeek64", "ilspy",
+        # PE analysis
+        "pestudio", "die", "peid",
+        "exeinfope", "CFF Explorer",
+        "ResourceHacker",
+        # API / behavior monitoring
+        "apimonitor-x64", "apimonitor-x86",
         "regmon", "filemon",
-        "apimonitor-x64", "apimonitor-x86"
+        # Forensics
+        "volatility", "vol",
+        "autopsy", "autopsy64",
+        "FTK Imager",
+        "HashCalc", "hashdeep", "md5deep",
+        # Hex editors
+        "HxD", "010Editor", "ImHex",
+        # Misc
+        "Regshot", "Regshot-x64-Unicode",
+        "fakenet", "inetsim",
+        "yara64", "yara32",
+        "ProcessHacker"
     )
 
     $running = Get-Process -ErrorAction SilentlyContinue |

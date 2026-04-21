@@ -9,6 +9,7 @@ static VOID AvmAppendEvent(_In_ ULONG Kind, _In_ ULONG Action, _In_opt_ PCWSTR M
  * Registry key leaf names to block (VM indicators)
  * ---------------------------------------------------------------- */
 static PCWSTR gRegistryBlockLeaves[] = {
+    /* VMware */
     L"VMware, Inc.",
     L"VMware Tools",
     L"VMware VGAuth",
@@ -25,11 +26,23 @@ static PCWSTR gRegistryBlockLeaves[] = {
     L"vm3dmp-stats",
     L"vm3dmp_loader",
     L"vmxnet3",
+    /* VirtualBox */
+    L"VirtualBox",
+    L"Oracle",
+    L"VirtualBox Guest Additions",
+    L"VBoxGuest",
+    L"VBoxMouse",
+    L"VBoxSF",
+    L"VBoxVideo",
+    L"VBoxService",
+    L"VBoxTray",
+    L"VBoxWddm",
 };
 #define AVM_REGISTRY_BLOCK_COUNT (sizeof(gRegistryBlockLeaves) / sizeof(gRegistryBlockLeaves[0]))
 
 /* Default file paths the kernel driver can load into its rule set */
 static PCWSTR gDefaultHidePaths[] = {
+    /* VMware drivers */
     L"C:\\Windows\\System32\\drivers\\vmci.sys",
     L"C:\\Windows\\System32\\drivers\\vmhgfs.sys",
     L"C:\\Windows\\System32\\drivers\\vmmouse.sys",
@@ -44,6 +57,20 @@ static PCWSTR gDefaultHidePaths[] = {
     L"C:\\Program Files\\VMware\\VMware Tools\\VMwareToolboxCmd.exe",
     L"C:\\Program Files\\VMware",
     L"C:\\Program Files\\VMware\\VMware Tools",
+    /* VirtualBox drivers and files */
+    L"C:\\Windows\\System32\\drivers\\VBoxGuest.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxMouse.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxSF.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxVideo.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxWddm.sys",
+    L"C:\\Windows\\System32\\VBoxControl.exe",
+    L"C:\\Windows\\System32\\VBoxService.exe",
+    L"C:\\Windows\\System32\\VBoxTray.exe",
+    L"C:\\Windows\\System32\\VBoxDisp.dll",
+    L"C:\\Windows\\System32\\VBoxHook.dll",
+    L"C:\\Windows\\System32\\VBoxOGL.dll",
+    L"C:\\Program Files\\Oracle\\VirtualBox Guest Additions",
+    L"C:\\Program Files\\Oracle",
 };
 #define AVM_DEFAULT_HIDE_PATH_COUNT (sizeof(gDefaultHidePaths) / sizeof(gDefaultHidePaths[0]))
 
@@ -108,12 +135,17 @@ typedef struct _AVM_VALUE_SPOOF {
 } AVM_VALUE_SPOOF;
 
 static const AVM_VALUE_SPOOF gValueSpoofs[] = {
+    /* VMware BIOS values */
     { L"\\BIOS",              L"BIOSVendor",        L"Dell Inc." },
     { L"\\BIOS",              L"SystemManufacturer", L"Dell Inc." },
     { L"\\BIOS",              L"SystemProductName",  L"OptiPlex 7090" },
     { L"\\BIOS",              L"BIOSVersion",        L"2.18.0" },
     { L"\\BIOS",              L"BaseBoardManufacturer", L"Dell Inc." },
     { L"\\BIOS",              L"BaseBoardProduct",   L"0XHGX6" },
+    /* VirtualBox BIOS values (innotek/Oracle) */
+    { L"\\BIOS",              L"BIOSReleaseDate",    L"09/17/2023" },
+    { L"\\BIOS",              L"SystemFamily",       L"OptiPlex" },
+    /* SystemInformation path */
     { L"\\SystemInformation", L"BIOSVersion",        L"2.18.0" },
     { L"\\SystemInformation", L"SystemManufacturer", L"Dell Inc." },
     { L"\\SystemInformation", L"SystemProductName",  L"OptiPlex 7090" },

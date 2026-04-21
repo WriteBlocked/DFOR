@@ -222,6 +222,36 @@ static void CheckVmwareRegistryKeys()
              found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
 }
 
+static void CheckVBoxRegistryKeys()
+{
+    const wchar_t* keys[] = {
+        L"SOFTWARE\\Oracle\\VirtualBox Guest Additions",
+        L"SYSTEM\\CurrentControlSet\\Services\\VBoxGuest",
+        L"SYSTEM\\CurrentControlSet\\Services\\VBoxMouse",
+        L"SYSTEM\\CurrentControlSet\\Services\\VBoxSF",
+        L"SYSTEM\\CurrentControlSet\\Services\\VBoxVideo",
+        L"SYSTEM\\CurrentControlSet\\Services\\VBoxService",
+    };
+    int found = 0;
+    std::string detail;
+    for (int i = 0; i < _countof(keys); i++) {
+        HKEY hk = NULL;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, keys[i], 0,
+                          KEY_READ, &hk) == ERROR_SUCCESS) {
+            RegCloseKey(hk);
+            found++;
+            if (!detail.empty()) detail += ", ";
+            detail += WideToUtf8(keys[i]);
+        }
+    }
+    char buf[64];
+    sprintf_s(buf, "%d of %d keys found", found, (int)_countof(keys));
+    if (found > 0) detail = std::string(buf) + ": " + detail;
+    else detail = buf;
+    AddCheck("VirtualBox registry keys", "Registry",
+             found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
+}
+
 /* ------------------------------------------------------------------ */
 /*  VMware driver / service names                                      */
 /* ------------------------------------------------------------------ */
@@ -255,6 +285,38 @@ static void CheckVmwareServices()
     if (found > 0) detail = std::string(buf) + ": " + detail;
     else detail = buf;
     AddCheck("VMware services/drivers", "Services",
+             found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
+}
+
+static void CheckVBoxServices()
+{
+    const wchar_t* services[] = {
+        L"VBoxGuest", L"VBoxMouse", L"VBoxSF", L"VBoxVideo",
+        L"VBoxService", L"VBoxWddm",
+    };
+    SC_HANDLE scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
+    if (!scm) {
+        AddCheck("VirtualBox services", "Services", PROBE_ERROR,
+                 "Could not open SCM");
+        return;
+    }
+    int found = 0;
+    std::string detail;
+    for (int i = 0; i < _countof(services); i++) {
+        SC_HANDLE h = OpenServiceW(scm, services[i], SERVICE_QUERY_STATUS);
+        if (h) {
+            CloseServiceHandle(h);
+            found++;
+            if (!detail.empty()) detail += ", ";
+            detail += WideToUtf8(services[i]);
+        }
+    }
+    CloseServiceHandle(scm);
+    char buf[64];
+    sprintf_s(buf, "%d of %d services found", found, (int)_countof(services));
+    if (found > 0) detail = std::string(buf) + ": " + detail;
+    else detail = buf;
+    AddCheck("VirtualBox services", "Services",
              found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
 }
 
@@ -321,6 +383,63 @@ static void CheckVmwareDirectories()
              found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
 }
 
+static void CheckVBoxFiles()
+{
+    const wchar_t* files[] = {
+        L"C:\\Windows\\System32\\drivers\\VBoxGuest.sys",
+        L"C:\\Windows\\System32\\drivers\\VBoxMouse.sys",
+        L"C:\\Windows\\System32\\drivers\\VBoxSF.sys",
+        L"C:\\Windows\\System32\\drivers\\VBoxVideo.sys",
+        L"C:\\Windows\\System32\\drivers\\VBoxWddm.sys",
+        L"C:\\Windows\\System32\\VBoxControl.exe",
+        L"C:\\Windows\\System32\\VBoxService.exe",
+        L"C:\\Windows\\System32\\VBoxTray.exe",
+        L"C:\\Windows\\System32\\VBoxDisp.dll",
+        L"C:\\Windows\\System32\\VBoxHook.dll",
+        L"C:\\Windows\\System32\\VBoxOGL.dll",
+    };
+    int found = 0;
+    std::string detail;
+    for (int i = 0; i < _countof(files); i++) {
+        if (GetFileAttributesW(files[i]) != INVALID_FILE_ATTRIBUTES) {
+            found++;
+            if (!detail.empty()) detail += ", ";
+            detail += WideToUtf8(files[i]);
+        }
+    }
+    char buf[64];
+    sprintf_s(buf, "%d of %d files found", found, (int)_countof(files));
+    if (found > 0) detail = std::string(buf) + ": " + detail;
+    else detail = buf;
+    AddCheck("VirtualBox files", "Files",
+             found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
+}
+
+static void CheckVBoxDirectories()
+{
+    const wchar_t* dirs[] = {
+        L"C:\\Program Files\\Oracle",
+        L"C:\\Program Files\\Oracle\\VirtualBox Guest Additions",
+    };
+    int found = 0;
+    std::string detail;
+    for (int i = 0; i < _countof(dirs); i++) {
+        DWORD attr = GetFileAttributesW(dirs[i]);
+        if (attr != INVALID_FILE_ATTRIBUTES &&
+            (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            found++;
+            if (!detail.empty()) detail += ", ";
+            detail += WideToUtf8(dirs[i]);
+        }
+    }
+    char buf[64];
+    sprintf_s(buf, "%d of %d directories found", found, (int)_countof(dirs));
+    if (found > 0) detail = std::string(buf) + ": " + detail;
+    else detail = buf;
+    AddCheck("VirtualBox directories", "Files",
+             found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
+}
+
 /* ------------------------------------------------------------------ */
 /*  VMware processes                                                   */
 /* ------------------------------------------------------------------ */
@@ -365,6 +484,46 @@ static void CheckVmwareProcesses()
              found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
 }
 
+static void CheckVBoxProcesses()
+{
+    const wchar_t* procNames[] = {
+        L"VBoxService.exe", L"VBoxTray.exe", L"VBoxControl.exe",
+        L"VirtualBox.exe", L"VirtualBoxVM.exe",
+    };
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        AddCheck("VirtualBox processes", "Processes", PROBE_ERROR,
+                 "Could not create process snapshot");
+        return;
+    }
+    int found = 0;
+    std::string detail;
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            for (int i = 0; i < _countof(procNames); i++) {
+                if (_wcsicmp(pe.szExeFile, procNames[i]) == 0) {
+                    found++;
+                    if (!detail.empty()) detail += ", ";
+                    detail += WideToUtf8(procNames[i]);
+                    break;
+                }
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    if (found > 0) {
+        char buf[32];
+        sprintf_s(buf, "%d running: ", found);
+        detail = std::string(buf) + detail;
+    } else {
+        detail = "none running";
+    }
+    AddCheck("VirtualBox processes", "Processes",
+             found > 0 ? DETECTED : NOT_DETECTED, detail.c_str());
+}
+
 /* ------------------------------------------------------------------ */
 /*  MAC address OUI                                                    */
 /* ------------------------------------------------------------------ */
@@ -393,7 +552,8 @@ static void CheckMacAddressOui()
                         (m[0]==0x00 && m[1]==0x50 && m[2]==0x56) ||
                         (m[0]==0x00 && m[1]==0x05 && m[2]==0x69) ||
                         (m[0]==0x00 && m[1]==0x1C && m[2]==0x14);
-        if (isVmware) {
+        bool isVBox = (m[0]==0x08 && m[1]==0x00 && m[2]==0x27);
+        if (isVmware || isVBox) {
             found++;
             char ms[24];
             sprintf_s(ms, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -402,9 +562,9 @@ static void CheckMacAddressOui()
             detail += ms;
         }
     }
-    AddCheck("MAC address OUI (VMware)", "Network",
+    AddCheck("MAC address OUI (VM)", "Network",
              found > 0 ? DETECTED : NOT_DETECTED,
-             found > 0 ? detail.c_str() : "no VMware OUI found");
+             found > 0 ? detail.c_str() : "no VMware/VirtualBox OUI found");
 }
 
 /* ------------------------------------------------------------------ */
@@ -418,6 +578,16 @@ static void CheckVmwareToolsInstalled()
     bool installed = path.find("(could not open") == std::string::npos &&
                      path.find("(value not found)") == std::string::npos;
     AddCheck("VMware Tools installed", "VMware",
+             installed ? DETECTED : NOT_DETECTED, path.c_str());
+}
+
+static void CheckVBoxGuestAdditions()
+{
+    std::string path = ReadRegString(HKEY_LOCAL_MACHINE,
+        L"SOFTWARE\\Oracle\\VirtualBox Guest Additions", L"InstallDir");
+    bool installed = path.find("(could not open") == std::string::npos &&
+                     path.find("(value not found)") == std::string::npos;
+    AddCheck("VBox Guest Additions", "VirtualBox",
              installed ? DETECTED : NOT_DETECTED, path.c_str());
 }
 
@@ -566,15 +736,43 @@ static void CheckMinifilterDirEnum()
 static void CheckAnalysisToolProcesses()
 {
     static const wchar_t* toolProcs[] = {
+        /* Sysinternals */
         L"procmon.exe", L"procmon64.exe", L"procexp.exe", L"procexp64.exe",
+        L"autoruns.exe", L"autoruns64.exe", L"tcpview.exe", L"tcpview64.exe",
+        L"Sysmon.exe", L"Sysmon64.exe", L"handle.exe", L"handle64.exe",
+        L"listdlls.exe", L"listdlls64.exe", L"vmmap.exe", L"vmmap64.exe",
+        L"strings.exe", L"strings64.exe", L"accesschk.exe", L"accesschk64.exe",
+        /* Network capture */
         L"wireshark.exe", L"dumpcap.exe", L"tshark.exe",
+        L"fiddler.exe", L"NetworkMiner.exe", L"rawcap.exe",
+        L"HttpAnalyzerStdV7.exe", L"SmartSniff.exe",
+        /* Disassemblers / Decompilers */
         L"ida.exe", L"ida64.exe", L"idaq.exe", L"idaq64.exe",
+        L"ghidra.exe", L"ghidraRun.exe", L"ghidraRun.bat",
+        L"r2.exe", L"radare2.exe", L"cutter.exe", L"iaito.exe",
+        L"binaryninja.exe", L"hopper.exe",
+        /* Debuggers */
         L"x64dbg.exe", L"x32dbg.exe", L"ollydbg.exe",
-        L"windbg.exe", L"kd.exe", L"cdb.exe",
-        L"fiddler.exe", L"pestudio.exe", L"die.exe",
+        L"windbg.exe", L"kd.exe", L"cdb.exe", L"ntsd.exe",
+        L"dnSpy.exe", L"dotPeek64.exe", L"ilspy.exe",
+        /* PE analysis */
+        L"pestudio.exe", L"die.exe", L"peid.exe",
+        L"exeinfope.exe", L"CFF Explorer.exe",
+        L"ResourceHacker.exe",
+        /* API / behavior monitoring */
         L"apimonitor-x64.exe", L"apimonitor-x86.exe",
-        L"autoruns.exe", L"autoruns64.exe",
-        L"tcpview.exe", L"tcpview64.exe",
+        L"regmon.exe", L"filemon.exe",
+        /* Sandbox / forensic frameworks */
+        L"volatility.exe", L"vol.exe",
+        L"autopsy.exe", L"autopsy64.exe",
+        L"FTK Imager.exe",
+        L"HashCalc.exe", L"hashdeep.exe", L"md5deep.exe",
+        /* Hex editors */
+        L"HxD.exe", L"010Editor.exe", L"ImHex.exe",
+        /* Misc */
+        L"Regshot.exe", L"Regshot-x64-Unicode.exe",
+        L"fakenet.exe", L"inetsim.exe",
+        L"yara64.exe", L"yara32.exe",
     };
     int found = 0;
     std::string detail;
@@ -869,12 +1067,18 @@ int main(int argc, char** argv)
     CheckSystemManufacturer();
     CheckSystemProductName();
     CheckVmwareRegistryKeys();
+    CheckVBoxRegistryKeys();
     CheckVmwareServices();
+    CheckVBoxServices();
     CheckVmwareFiles();
     CheckVmwareDirectories();
+    CheckVBoxFiles();
+    CheckVBoxDirectories();
     CheckVmwareProcesses();
+    CheckVBoxProcesses();
     CheckMacAddressOui();
     CheckVmwareToolsInstalled();
+    CheckVBoxGuestAdditions();
     CheckTimingDelta();
     CheckAnalysisToolProcesses();
     CheckUserActivity();

@@ -22,11 +22,51 @@ static PCWSTR gDefaultHidePaths[] = {
     L"C:\\Program Files\\VMware\\VMware Tools\\VMwareToolboxCmd.exe",
     L"C:\\Program Files\\VMware",
     L"C:\\Program Files\\VMware\\VMware Tools",
-    /* Common analysis tools - files that reveal an analysis environment */
+    /* VirtualBox driver files */
+    L"C:\\Windows\\System32\\drivers\\VBoxGuest.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxMouse.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxSF.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxVideo.sys",
+    L"C:\\Windows\\System32\\drivers\\VBoxWddm.sys",
+    /* VirtualBox system files */
+    L"C:\\Windows\\System32\\VBoxControl.exe",
+    L"C:\\Windows\\System32\\VBoxService.exe",
+    L"C:\\Windows\\System32\\VBoxTray.exe",
+    L"C:\\Windows\\System32\\VBoxDisp.dll",
+    L"C:\\Windows\\System32\\VBoxHook.dll",
+    L"C:\\Windows\\System32\\VBoxOGL.dll",
+    /* VirtualBox Guest Additions */
+    L"C:\\Program Files\\Oracle\\VirtualBox Guest Additions",
+    L"C:\\Program Files\\Oracle",
+    /* Analysis tools — directories */
     L"C:\\Program Files\\Wireshark",
     L"C:\\Program Files (x86)\\Wireshark",
-    L"C:\\Program Files\\Wireshark\\Wireshark.exe",
     L"C:\\ProgramData\\chocolatey\\lib\\sysinternals",
+    L"C:\\Program Files\\IDA Pro",
+    L"C:\\Program Files\\IDA Free",
+    L"C:\\Program Files (x86)\\IDA Free",
+    L"C:\\Program Files\\Ghidra",
+    L"C:\\Program Files\\x64dbg",
+    L"C:\\Program Files (x86)\\x64dbg",
+    L"C:\\Program Files\\Fiddler",
+    L"C:\\Program Files\\Process Monitor",
+    L"C:\\Program Files\\pestudio",
+    L"C:\\Program Files\\Detect It Easy",
+    L"C:\\Program Files\\HxD",
+    L"C:\\Program Files\\Cutter",
+    L"C:\\Program Files\\Regshot",
+    L"C:\\Program Files (x86)\\Regshot",
+    L"C:\\Program Files\\HashCalc",
+    L"C:\\Program Files\\NetworkMiner",
+    L"C:\\Program Files\\Volatility",
+    L"C:\\Program Files\\Autopsy",
+    L"C:\\Program Files\\FTK Imager",
+    L"C:\\Program Files (x86)\\AccessData",
+    L"C:\\Program Files\\YARA",
+    L"C:\\Tools",
+    /* Analysis tools — executables */
+    L"C:\\Program Files\\Wireshark\\Wireshark.exe",
+    L"C:\\Windows\\System32\\Sysinternals",
 };
 #define AVM_DEFAULT_HIDE_COUNT (sizeof(gDefaultHidePaths) / sizeof(gDefaultHidePaths[0]))
 

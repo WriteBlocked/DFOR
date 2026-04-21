@@ -1,12 +1,12 @@
 ''' DFOR 772
-    EDIT: Your Name '''
+    Hiller Hoover '''
 
 # extract and check ICMP packet payload bytes from pcap file
 
 ''' Change Log:
     5/2/2016: version 1.0
     4/15/2025: version 2.0: reworked logic
-    EDIT as appropriate
+    4/20/2026: updated EDITs
 '''
 
 import hashlib

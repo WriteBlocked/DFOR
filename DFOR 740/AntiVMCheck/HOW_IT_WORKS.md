@@ -347,7 +347,9 @@ All components share the same data structures defined in `shared\avm_shared.h`:
 
 ### Registry Keys (Kernel Driver)
 
-The kernel driver blocks access to registry keys whose **leaf name** matches any of these 16 entries:
+The kernel driver blocks access to registry keys whose **leaf name** matches any of these entries:
+
+**VMware Keys:**
 
 | Blocked Leaf Name | What It Is |
 |-------------------|------------|
@@ -368,9 +370,26 @@ The kernel driver blocks access to registry keys whose **leaf name** matches any
 | vm3dmp_loader | VM3DMP loader |
 | vmxnet3 | VMware network adapter |
 
+**VirtualBox Keys:**
+
+| Blocked Leaf Name | What It Is |
+|-------------------|------------|
+| VBoxGuest | VirtualBox Guest Additions driver |
+| VBoxMouse | VirtualBox mouse integration |
+| VBoxSF | VirtualBox shared folders |
+| VBoxVideo | VirtualBox video driver |
+| VBoxService | VirtualBox guest service |
+| VBoxTray | VirtualBox tray applet |
+| VBoxWddm | VirtualBox WDDM display driver |
+| Oracle | Oracle vendor key (parent of VBox GA) |
+| VirtualBox | VirtualBox root key |
+| VirtualBox Guest Additions | VBox Guest Additions config |
+
 ### Files and Directories (Minifilter)
 
 The minifilter hides these paths by default (plus any user-added rules):
+
+**VMware Files:**
 
 | Hidden Path | Type |
 |-------------|------|
@@ -388,10 +407,46 @@ The minifilter hides these paths by default (plus any user-added rules):
 | `C:\Program Files\VMware\VMware Tools\VMwareToolboxCmd.exe` | Executable |
 | `C:\Program Files\VMware` | Directory |
 | `C:\Program Files\VMware\VMware Tools` | Directory |
-| `C:\Program Files\Wireshark` | Analysis tool dir |
-| `C:\Program Files (x86)\Wireshark` | Analysis tool dir |
-| `C:\Program Files\Wireshark\Wireshark.exe` | Analysis tool exe |
-| `C:\ProgramData\chocolatey\lib\sysinternals` | Analysis tool dir |
+
+**VirtualBox Files:**
+
+| Hidden Path | Type |
+|-------------|------|
+| `C:\Windows\System32\drivers\VBoxGuest.sys` | Driver file |
+| `C:\Windows\System32\drivers\VBoxMouse.sys` | Driver file |
+| `C:\Windows\System32\drivers\VBoxSF.sys` | Driver file |
+| `C:\Windows\System32\drivers\VBoxVideo.sys` | Driver file |
+| `C:\Windows\System32\drivers\VBoxWddm.sys` | Driver file |
+| `C:\Windows\System32\VBoxControl.exe` | Executable |
+| `C:\Windows\System32\VBoxService.exe` | Executable |
+| `C:\Windows\System32\VBoxTray.exe` | Executable |
+| `C:\Windows\System32\VBoxDisp.dll` | Library |
+| `C:\Windows\System32\VBoxHook.dll` | Library |
+| `C:\Windows\System32\VBoxOGL.dll` | Library |
+| `C:\Program Files\Oracle\VirtualBox Guest Additions` | Directory |
+| `C:\Program Files\Oracle` | Directory |
+
+**Analysis Tool Paths:**
+
+| Hidden Path | Type |
+|-------------|------|
+| `C:\Program Files\Wireshark` | Network analyzer |
+| `C:\Program Files\IDA Pro` | Disassembler |
+| `C:\Program Files\IDA Free` | Disassembler |
+| `C:\Program Files\Ghidra` | Reverse engineering |
+| `C:\Program Files\x64dbg` | Debugger |
+| `C:\Program Files\Fiddler` | HTTP debugger |
+| `C:\Program Files\pestudio` | PE analyzer |
+| `C:\Program Files\Detect It Easy` | PE identifier |
+| `C:\Program Files\HxD` | Hex editor |
+| `C:\Program Files\Cutter` | RE framework |
+| `C:\Program Files\Regshot` | Registry diff tool |
+| `C:\Program Files\Volatility` | Memory forensics |
+| `C:\Program Files\Autopsy` | Digital forensics |
+| `C:\Program Files\FTK Imager` | Forensic imager |
+| `C:\Program Files\YARA` | Pattern matcher |
+| `C:\Tools` | Common analysis tools dir |
+| *(plus more — see filter.c for full list)* | |
 
 ### Registry Values (Kernel Driver — Value Spoofing)
 
@@ -405,9 +460,13 @@ The kernel driver spoofs these BIOS/hardware identity values when queried by any
 | `HARDWARE\DESCRIPTION\System\BIOS` | BIOSVersion | 2.18.0 |
 | `HARDWARE\DESCRIPTION\System\BIOS` | BaseBoardManufacturer | Dell Inc. |
 | `HARDWARE\DESCRIPTION\System\BIOS` | BaseBoardProduct | 0XHGX6 |
+| `HARDWARE\DESCRIPTION\System\BIOS` | BIOSReleaseDate | 09/17/2023 |
+| `HARDWARE\DESCRIPTION\System\BIOS` | SystemFamily | OptiPlex |
+| `HARDWARE\DESCRIPTION\System\SystemInformation` | BIOSVersion | 2.18.0 |
 | `HARDWARE\DESCRIPTION\System\SystemInformation` | SystemManufacturer | Dell Inc. |
 | `HARDWARE\DESCRIPTION\System\SystemInformation` | SystemProductName | OptiPlex 7090 |
-| `HARDWARE\DESCRIPTION\System\SystemInformation` | BIOSVersion | 2.18.0 |
+
+> These spoofs cover both VMware values ("VMware, Inc.") and VirtualBox values ("innotek GmbH", "Oracle Corporation", "VirtualBox") — any VM-specific string in these keys is replaced with the Dell equivalent.
 
 ### System-Level Spoofing (build.ps1 -Install)
 
@@ -415,7 +474,7 @@ The install script applies these one-time system modifications:
 
 | Action | What It Does |
 |--------|-------------|
-| **MAC address spoofing** | Finds network adapters with VMware OUI prefixes (00:0C:29, 00:50:56, 00:05:69, 00:1C:14), replaces with Dell OUI (D4:BE:D9:xx:xx:xx) via the NetworkAddress registry key, restarts adapter |
+| **MAC address spoofing** | Finds network adapters with VMware OUI prefixes (00:0C:29, 00:50:56, 00:05:69, 00:1C:14) or VirtualBox OUI (08:00:27), replaces with Dell OUI (D4:BE:D9:xx:xx:xx) via the NetworkAddress registry key, restarts adapter |
 | **BIOS value overwrite** | Writes spoofed Dell values directly to `HKLM\HARDWARE\DESCRIPTION\System\BIOS` (volatile — resets on reboot) |
 | **User activity simulation** | Creates realistic-looking documents, desktop shortcuts, Chrome profile directory, and Recent file entries so the VM doesn't appear freshly provisioned |
 | **Analysis tool detection** | Warns if common forensic tools (Wireshark, Process Monitor, IDA, x64dbg, etc.) are running |
@@ -579,7 +638,7 @@ sc.exe delete AvmKernel
 
 ## 9. Validating with AvmProbeTest
 
-AvmProbeTest performs 21 checks across 13 categories:
+AvmProbeTest performs 27 checks across multiple categories:
 
 | # | Category | Check | What It Tests |
 |---|----------|-------|---------------|
@@ -589,21 +648,27 @@ AvmProbeTest performs 21 checks across 13 categories:
 | 4 | BIOS | System manufacturer | Registry `SystemManufacturer` value |
 | 5 | BIOS | System product name | Registry `SystemProductName` value |
 | 6 | Registry | VMware registry keys | 6 specific registry key paths |
-| 7 | Services | VMware services | 10 service names via SCM |
-| 8 | Files | VMware files | 8 file paths on disk |
-| 9 | Files | VMware directories | 3 directory paths |
-| 10 | Processes | VMware processes | Process enumeration for known names |
-| 11 | Network | MAC address OUI | VMware OUI prefixes (00:0C:29, 00:50:56, 00:05:69, 00:1C:14) |
-| 12 | VMware | VMware Tools path | Registry install path check |
-| 13 | Timing | Sleep delta | 500ms sleep accuracy measurement |
-| 14 | AnalysisTools | Analysis tool processes | Running forensic/analysis tools |
-| 15 | UserActivity | User activity indicators | Empty Documents/Desktop/Pictures/Downloads |
-| 16 | Hardware | Hardware identity (baseboard) | BaseBoardManufacturer and BaseBoardProduct |
-| 17 | Hardware | BIOS serial / family | BIOSReleaseDate and SystemFamily |
-| 18 | Driver | AvmKernel status | IOCTL to `\\.\AvmKernel` |
-| 19 | Minifilter | Path probe | CreateFile on a known VM artifact |
-| 20 | Minifilter | Directory enum | FindFirstFile on VMware directory |
-| 21 | Runtime | Shim DLL presence | File existence check for shim DLL |
+| 7 | Registry | VirtualBox registry keys | 6 VirtualBox-specific key paths |
+| 8 | Services | VMware services | 10 service names via SCM |
+| 9 | Services | VirtualBox services | 6 VirtualBox service names via SCM |
+| 10 | Files | VMware files | 8 file paths on disk |
+| 11 | Files | VMware directories | 3 directory paths |
+| 12 | Files | VirtualBox files | 11 VBox file paths on disk |
+| 13 | Files | VirtualBox directories | 2 Oracle/VBox directory paths |
+| 14 | Processes | VMware processes | Process enumeration for known names |
+| 15 | Processes | VirtualBox processes | VBoxService.exe, VBoxTray.exe, etc. |
+| 16 | Network | MAC address OUI | VMware and VirtualBox OUI prefixes |
+| 17 | VMware | VMware Tools path | Registry install path check |
+| 18 | VirtualBox | VBox Guest Additions | Registry install path check |
+| 19 | Timing | Sleep delta | 500ms sleep accuracy measurement |
+| 20 | AnalysisTools | Analysis tool processes | 60+ forensic/analysis tool process names |
+| 21 | UserActivity | User activity indicators | Empty Documents/Desktop/Pictures/Downloads |
+| 22 | Hardware | Hardware identity (baseboard) | BaseBoardManufacturer and BaseBoardProduct |
+| 23 | Hardware | BIOS serial / family | BIOSReleaseDate and SystemFamily |
+| 24 | Driver | AvmKernel status | IOCTL to `\\.\AvmKernel` |
+| 25 | Minifilter | Path probe | CreateFile on a known VM artifact |
+| 26 | Minifilter | Directory enum | FindFirstFile on VMware/VBox directory |
+| 27 | Runtime | Shim DLL presence | File existence check for shim DLL |
 
 ### Interpreting Results
 
@@ -618,13 +683,20 @@ AvmProbeTest performs 21 checks across 13 categories:
 | CPUID | — | — | ✓ (if hooked) |
 | BIOS/Registry | ✓ (registry callback) | — | ✓ (RegOpenKeyEx hook) |
 | VMware registry keys | ✓ (registry callback) | — | ✓ (RegOpenKeyEx hook) |
+| VirtualBox registry keys | ✓ (registry callback) | — | ✓ (RegOpenKeyEx hook) |
 | VMware services | — | — | — |
+| VirtualBox services | — | — | — |
 | VMware files | — | ✓ (PreCreate) | ✓ (CreateFileW hook) |
 | VMware directories | — | ✓ (PostDirControl) | ✓ (FindFirstFile hook) |
+| VirtualBox files | — | ✓ (PreCreate) | ✓ (CreateFileW hook) |
+| VirtualBox directories | — | ✓ (PostDirControl) | ✓ (FindFirstFile hook) |
 | VMware processes | — | — | ✓ (NtQuerySystemInfo hook) |
+| VirtualBox processes | — | — | ✓ (NtQuerySystemInfo hook) |
 | MAC address | — | — | — |
 | VMware Tools | ✓ (registry callback) | — | ✓ (RegOpenKeyEx hook) |
+| VBox Guest Additions | ✓ (registry callback) | — | ✓ (RegOpenKeyEx hook) |
 | Timing | — | — | ✓ (QPC/GetTickCount hook) |
+| Analysis tools | — | ✓ (PreCreate hides paths) | — |
 | Driver status | ✓ (IOCTL) | — | — |
 | Minifilter probe | — | ✓ (PreCreate) | — |
 | Minifilter enum | — | ✓ (PostDirControl) | — |
@@ -636,17 +708,17 @@ AvmProbeTest performs 21 checks across 13 categories:
 
 ### What This System Can Hide
 
-✅ Registry keys related to VMware services and tools
+✅ Registry keys related to VMware and VirtualBox services and tools
 ✅ Registry values — BIOS vendor, manufacturer, product (spoofed to Dell via kernel callback)
-✅ VMware driver files and executables on disk
-✅ VMware entries in directory listings
-✅ MAC address (changed via build.ps1 to non-VMware OUI)
+✅ VMware and VirtualBox driver files and executables on disk
+✅ VMware and VirtualBox entries in directory listings
+✅ MAC address (changed via build.ps1 to non-VMware/VBox OUI)
 ✅ BIOS registry values (direct overwrite via build.ps1, kernel-level spoofing via callback)
 ✅ User activity artifacts (fake documents, browser profile, shortcuts)
-✅ Analysis tool file paths (Wireshark, Sysinternals, etc. hidden by minifilter)
+✅ Analysis tool file paths (Wireshark, IDA, Ghidra, x64dbg, Autopsy, etc. hidden by minifilter)
 ✅ Debugger presence (via runtime shim)
 ✅ Timing anomalies (via runtime shim)
-✅ VMware processes in process enumeration (via runtime shim)
+✅ VMware/VirtualBox processes in process enumeration (via runtime shim)
 ✅ Hardware baseboard identity (kernel registry value spoofing)
 
 ### What This System Cannot Hide (and Workarounds)
