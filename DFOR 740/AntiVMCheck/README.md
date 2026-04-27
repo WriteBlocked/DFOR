@@ -43,17 +43,16 @@ This repository contains a broad MVP for defensive sandbox research. It combines
 - Uses IAT patching and `GetProcAddress` interception to cover:
   - `IsDebuggerPresent`
   - `CheckRemoteDebuggerPresent`
-  - `NtQueryInformationProcess`
-  - `NtSetInformationThread`
+  - `NtQueryInformationProcess` (ProcessDebugPort, ProcessDebugObjectHandle, ProcessDebugFlags)
+  - `GetDiskFreeSpaceExA` / `GetDiskFreeSpaceExW` (fake 500 GB disk)
+  - `GetTickCount` / `GetTickCount64` (add 4-hour uptime offset)
   - `QueryPerformanceCounter`
-  - `GetTickCount64`
-  - `NtDelayExecution`
-  - `NtQuerySystemInformation`
-  - `RegOpenKeyExW`
-  - `RegQueryValueExW`
-  - `CreateFileW`
-  - `FindFirstFileExW`
-  - `FindNextFileW`
+  - `RegOpenKeyExA` / `RegOpenKeyExW` (block VMware/VirtualBox registry keys)
+  - `RegQueryValueExA` / `RegQueryValueExW`
+  - `CreateFileA` / `CreateFileW` (block VM pseudo-devices and driver paths)
+  - `GetFileAttributesA` / `GetFileAttributesW` (hide VM driver files)
+  - `GetAsyncKeyState` (simulate mouse-click activity for reverse-turing checks)
+  - `GetProcAddress` (redirect dynamic API resolution to shim hooks)
 
 ### GUI controller
 
@@ -261,8 +260,73 @@ fltmc filters  # verify AvmMiniFilter appears
 - The MVP avoids kernel patching and SSDT hooks by design; direct-syscall and kernel-resident malware are out of scope.
 - The runtime shim relies on IAT and `GetProcAddress` interception, so pre-resolved function pointers and custom syscall stubs are not fully covered.
 - The minifilter directory scrubber currently focuses on common directory information classes.
+- Current validation against Pafish still shows the guest MAC-address/OUI check as visible under VMware. This platform does not change the virtual NIC MAC address from inside the guest; that value must be changed in the hypervisor configuration.
+- To change the MAC address in **VMware Workstation/Player**, power off the VM, open **VM Settings -> Network Adapter -> Advanced**, then enter a new MAC address or generate one. VMware also documents a `.vmx`-file method for manual assignment when needed.
+- To change the MAC address in **VirtualBox**, power off the VM, open **Settings -> Network -> Advanced**, then edit the **MAC Address** field or generate a new one. The equivalent CLI form is `VBoxManage modifyvm "<VM Name>" --macaddress1 XXXXXXXXXXXX`.
 - Driver signing, INF packaging, and deployment are left in developer/test mode rather than production hardening.
 - The local environment used to generate this source tree did not expose MSBuild, the .NET SDK, or the WDK on PATH, so the included solution and build script are ready for a proper Windows driver toolchain but could not be built in-place here.
+
+## Hypervisor-Level Configuration
+
+Several VM detection techniques rely on CPU instructions or hardware-level signals that **cannot be intercepted or patched from inside the guest OS**. These require changes to the hypervisor configuration before booting the VM.
+
+### Pafish items that require hypervisor changes
+
+| Pafish check | Root cause | Fix |
+|---|---|---|
+| `rdtsc forcing VM exit` | RDTSC causes a VM exit; the exit latency is measurable | Use nested virtualisation or VMware's `monitor_control.virtual_rdtsc = TRUE`; full masking is not possible on all hardware |
+| `Hypervisor bit in CPUID` | CPUID leaf 1 ECX bit 31 is set by the hypervisor | See VMware section below |
+| `CPUID hypervisor vendor` | CPUID leaf 0x40000000 returns "VMwareVMware" | See VMware section below |
+| `VMware serial number` | VMware backdoor I/O port (0x5658 magic "VMXh") | See VMware section below |
+| `MAC address OUI` | Virtual NIC OUI is 00:0C:29 / 00:50:56 / 00:05:69 | See MAC address bullets above |
+
+### Hiding the hypervisor in VMware
+
+Add the following lines to the VM's `.vmx` file (power off first):
+
+```ini
+# Hide the hypervisor presence bit (CPUID leaf 1 ECX bit 31)
+cpuid.1.ecx = "----:----:----:----:----:----:--0-:----"
+
+# Remove the hypervisor vendor string (leaf 0x40000000)
+hypervisor.cpuid.v0 = FALSE
+
+# Disable the VMware backdoor I/O port (removes VMware serial-number check)
+monitor_control.disable_directexec = FALSE
+isolation.tools.getPtrLocation.disable = TRUE
+isolation.tools.setPtrLocation.disable = TRUE
+isolation.tools.setVersion.disable = TRUE
+isolation.tools.getVersion.disable = TRUE
+monitor_control.disable_chksimd = TRUE
+monitor_control.disable_ntreloc = TRUE
+monitor_control.disable_selfmod = TRUE
+monitor_control.disable_reloc = TRUE
+monitor_control.disable_btinout = TRUE
+monitor_control.disable_btmemspace = TRUE
+monitor_control.disable_btpriv = TRUE
+monitor_control.disable_btseg = TRUE
+```
+
+> **Note:** Disabling the VMware backdoor (`isolation.tools.*`) may break VMware Tools clipboard sharing and drag-and-drop. Hiding the CPUID hypervisor bit may interfere with Hyper-V enlightenments on nested guests.
+
+### Hiding the hypervisor in VirtualBox
+
+VirtualBox exposes similar settings via `VBoxManage`:
+
+```cmd
+REM Hide the hypervisor vendor CPUID leaf
+VBoxManage setextradata "<VM Name>" VBoxInternal/CPUM/EnableHVP 0
+
+REM Alternatively, mask CPUID leaf 0x80000002–0x80000004 (CPU brand)
+REM to avoid returning QEMU/VirtualBox strings
+VBoxManage modifyvm "<VM Name>" --cpuid-portability-level 1
+```
+
+Full masking of CPUID hypervisor presence is not possible in all VirtualBox versions; use an `--hwvirtex on` combined with `--paravirt-provider none` to suppress the standard Hyper-V interface:
+
+```cmd
+VBoxManage modifyvm "<VM Name>" --paravirt-provider none
+```
 
 ## AvmProbeTest — Validation Probe
 

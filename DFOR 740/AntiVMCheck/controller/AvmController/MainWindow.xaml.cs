@@ -58,10 +58,45 @@ namespace AvmController
         {
             if (!uint.TryParse(TargetValueText.Text, out var processId))
             {
+                MessageBox.Show("Enter a numeric PID in the target field.", "Inject Shim", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            InjectionService.InjectShim(processId);
+            try
+            {
+                InjectionService.InjectShim(processId);
+                TargetsList.Items.Add($"Shim injected → PID {processId}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Injection failed: {ex.Message}", "Inject Shim", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void LaunchWithShimButton_Click(object sender, RoutedEventArgs e)
+        {
+            var path = LaunchPathText.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                var dialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*",
+                    Title  = "Select executable to launch with shim"
+                };
+                if (dialog.ShowDialog(this) != true) return;
+                path = dialog.FileName;
+                LaunchPathText.Text = path;
+            }
+
+            try
+            {
+                var pid = InjectionService.LaunchWithShim(path);
+                TargetsList.Items.Add($"Launched with shim → PID {pid}  [{System.IO.Path.GetFileName(path)}]");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Launch failed: {ex.Message}", "Launch with Shim", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void AddHideRuleButton_Click(object sender, RoutedEventArgs e)

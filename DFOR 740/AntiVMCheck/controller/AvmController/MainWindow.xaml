@@ -49,10 +49,15 @@
                             <ComboBoxItem Content="Image Path Prefix" />
                         </ComboBox>
                         <TextBox x:Name="TargetValueText" Margin="0,0,0,8" />
-                        <StackPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Button Width="140" Margin="0,0,8,0" Content="Add Target" Click="AddTargetButton_Click" />
-                            <Button Width="140" Content="Inject Shim" Click="InjectShimButton_Click" />
+                            <Button Width="140" Content="Inject into PID" Click="InjectShimButton_Click" ToolTip="Inject the shim DLL into an already-running process by PID" />
                         </StackPanel>
+                        <Separator Margin="0,0,0,8" />
+                        <TextBlock Text="Launch with shim pre-injected:" FontSize="11" Foreground="Gray" Margin="0,0,0,4" />
+                        <TextBox x:Name="LaunchPathText" Margin="0,0,0,8" ToolTip="Executable path — leave blank to browse" />
+                        <Button Width="200" HorizontalAlignment="Left" Content="Launch with Shim" Click="LaunchWithShimButton_Click"
+                                ToolTip="Start the executable suspended, inject the shim before any code runs, then resume" />
                     </StackPanel>
                     <ListBox x:Name="TargetsList" Margin="0,12,0,0" />
                 </DockPanel>

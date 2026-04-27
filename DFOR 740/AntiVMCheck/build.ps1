@@ -436,44 +436,6 @@ function Launch-Controller {
 
 # ---------- VM concealment helpers ----------
 
-function Spoof-MacAddress {
-    Write-Step "Spoofing MAC address"
-
-    # VMware OUI prefixes to look for
-    $vmOuis = @("00-0C-29", "00-50-56", "00-05-69", "00-1C-14", "08-00-27")
-    $vmAdapters = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
-        $mac = $_.MacAddress
-        $vmOuis | Where-Object { $mac.StartsWith($_) }
-    }
-
-    if (-not $vmAdapters -or $vmAdapters.Count -eq 0) {
-        Write-Ok "No VMware MAC addresses found - no spoofing needed"
-        return
-    }
-
-    # Generate a realistic Dell MAC: D4-BE-D9-xx-xx-xx
-    $rng = [System.Random]::new()
-    $newMac = "D4BED9" + ('{0:X2}{1:X2}{2:X2}' -f $rng.Next(0,256), $rng.Next(0,256), $rng.Next(0,256))
-
-    foreach ($adapter in $vmAdapters) {
-        $regBase = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4D36E972-E325-11CE-BFC1-08002BE10318}"
-        Get-ChildItem $regBase -ErrorAction SilentlyContinue | ForEach-Object {
-            $desc = (Get-ItemProperty $_.PSPath -Name DriverDesc -ErrorAction SilentlyContinue).DriverDesc
-            if ($desc -and $desc -match $adapter.InterfaceDescription) {
-                Set-ItemProperty $_.PSPath -Name "NetworkAddress" -Value $newMac -ErrorAction SilentlyContinue
-            }
-        }
-
-        $ErrorActionPreference = "Continue"
-        Restart-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
-        $ErrorActionPreference = "Stop"
-
-        $formatted = ($newMac -replace '(.{2})(.{2})(.{2})(.{2})(.{2})(.{2})', '$1:$2:$3:$4:$5:$6')
-        Write-Ok "Adapter '$($adapter.Name)' MAC changed to $formatted"
-    }
-}
-
 function Spoof-BiosValues {
     Write-Step "Spoofing BIOS / hardware identity values"
 
@@ -720,7 +682,6 @@ if ($Install -and (-not $HasBuildTools)) {
     Install-Minifilter -MiniSysPath $MiniOutput
 
     # System-level VM concealment
-    Spoof-MacAddress
     Spoof-BiosValues
     Simulate-UserActivity
     Warn-AnalysisTools
@@ -813,7 +774,6 @@ Install-KernelDriver -KernelSysPath $KernelOutput
 Install-Minifilter -MiniSysPath $MiniOutput
 
 # System-level VM concealment
-Spoof-MacAddress
 Spoof-BiosValues
 Simulate-UserActivity
 Warn-AnalysisTools

@@ -98,6 +98,12 @@ AvmPreCreate(
     _Flt_CompletionContext_Outptr_ PVOID* CompletionContext);
 
 static FLT_PREOP_CALLBACK_STATUS
+AvmPreNetworkQueryOpen(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID* CompletionContext);
+
+static FLT_PREOP_CALLBACK_STATUS
 AvmPreDirControl(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
@@ -607,6 +613,80 @@ AvmPostDirControl(
 }
 
 /* ----------------------------------------------------------------
+ * PreNetworkQueryOpen - intercept fast-path GetFileAttributes
+ *
+ * NtQueryFullAttributesFile (used by GetFileAttributesA/W on Win10+)
+ * takes the IRP_MJ_NETWORK_QUERY_OPEN fast-I/O path and bypasses
+ * IRP_MJ_CREATE.  We mirror the same hide logic here.
+ * ---------------------------------------------------------------- */
+static FLT_PREOP_CALLBACK_STATUS
+AvmPreNetworkQueryOpen(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID* CompletionContext)
+{
+    PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+    NTSTATUS status;
+    ULONG enabledChecks;
+    BOOLEAN shouldHide = FALSE;
+    WCHAR truncName[AVM_MAX_TEXT_CHARS];
+    USHORT copyLen;
+
+    UNREFERENCED_PARAMETER(FltObjects);
+    *CompletionContext = NULL;
+
+    ExAcquireFastMutex(&gState.Guard);
+    enabledChecks = gState.Policy.EnabledChecks;
+    ExReleaseFastMutex(&gState.Guard);
+
+    if (!(enabledChecks & AvmCheckFileArtifacts))
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    if (!AvmIsTargeted())
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    status = FltGetFileNameInformation(Data,
+        FLT_FILE_NAME_NORMALIZED |
+        FLT_FILE_NAME_QUERY_ALWAYS_ALLOW_CACHE_LOOKUP,
+        &nameInfo);
+
+    if (!NT_SUCCESS(status)) {
+        /* Cannot resolve the name in the fast path; force the request
+         * through the regular IRP_MJ_CREATE path instead so our
+         * AvmPreCreate callback can inspect it. */
+        return FLT_PREOP_DISALLOW_FASTIO;
+    }
+
+    status = FltParseFileNameInformation(nameInfo);
+    if (!NT_SUCCESS(status)) {
+        FltReleaseFileNameInformation(nameInfo);
+        return FLT_PREOP_DISALLOW_FASTIO;
+    }
+
+    ExAcquireFastMutex(&gState.Guard);
+    shouldHide = AvmShouldHidePath_Locked(&nameInfo->Name);
+    ExReleaseFastMutex(&gState.Guard);
+
+    if (shouldHide) {
+        RtlZeroMemory(truncName, sizeof(truncName));
+        copyLen = nameInfo->Name.Length / sizeof(WCHAR);
+        if (copyLen >= AVM_MAX_TEXT_CHARS) copyLen = AVM_MAX_TEXT_CHARS - 1;
+        RtlCopyMemory(truncName, nameInfo->Name.Buffer, copyLen * sizeof(WCHAR));
+
+        AvmFilterAppendEvent(AvmEventFileProbe, AvmActionHide,
+            L"PreNetworkQueryOpen", truncName, L"hidden");
+
+        FltReleaseFileNameInformation(nameInfo);
+        Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+        Data->IoStatus.Information = 0;
+        return FLT_PREOP_COMPLETE;
+    }
+
+    FltReleaseFileNameInformation(nameInfo);
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+/* ----------------------------------------------------------------
  * Communication port callbacks
  * ---------------------------------------------------------------- */
 static NTSTATUS
@@ -720,8 +800,9 @@ AvmMessageNotify(
  * Filter registration
  * ---------------------------------------------------------------- */
 CONST FLT_OPERATION_REGISTRATION gCallbacks[] = {
-    { IRP_MJ_CREATE,            0, AvmPreCreate,     NULL              },
-    { IRP_MJ_DIRECTORY_CONTROL, 0, AvmPreDirControl, AvmPostDirControl },
+    { IRP_MJ_CREATE,             0, AvmPreCreate,           NULL              },
+    { IRP_MJ_NETWORK_QUERY_OPEN, 0, AvmPreNetworkQueryOpen, NULL              },
+    { IRP_MJ_DIRECTORY_CONTROL,  0, AvmPreDirControl,       AvmPostDirControl },
     { IRP_MJ_OPERATION_END }
 };
 
