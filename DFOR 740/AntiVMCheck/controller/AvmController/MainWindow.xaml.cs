@@ -2,11 +2,14 @@ using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Threading;
 
 namespace AvmController
@@ -17,21 +20,52 @@ namespace AvmController
         private readonly List<AvmTargetEntry> _targets = new List<AvmTargetEntry>();
         private readonly List<AvmFileRule> _fileRules = new List<AvmFileRule>();
         private readonly DispatcherTimer _timer;
+        private readonly ICollectionView _telemetryView;
 
         public MainWindow()
         {
             InitializeComponent();
             DataContext = this;
             Telemetry = _telemetry;
+            _telemetryView = CollectionViewSource.GetDefaultView(_telemetry);
+            _telemetryView.Filter = FilterTelemetryItem;
+            Loaded += MainWindow_Loaded;
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
             _timer.Tick += (_, __) => RefreshState();
             _timer.Start();
+            ApplyTelemetrySort(false);
         }
 
         public ObservableCollection<TelemetryItem> Telemetry { get; }
 
         private void RefreshButton_Click(object sender, RoutedEventArgs e) => RefreshState();
+
+        private void TelemetryFilterText_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _telemetryView.Refresh();
+        }
+
+        private void SortTelemetryNewest_Click(object sender, RoutedEventArgs e)
+        {
+            ApplyTelemetrySort(false);
+        }
+
+        private void SortTelemetryOldest_Click(object sender, RoutedEventArgs e)
+        {
+            ApplyTelemetrySort(true);
+        }
+
+        private void ClearTelemetryButton_Click(object sender, RoutedEventArgs e)
+        {
+            _telemetry.Clear();
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            RefreshState();
+            TryAutoApplyDefaultPolicy();
+        }
 
         private void AddTargetButton_Click(object sender, RoutedEventArgs e)
         {
@@ -75,28 +109,116 @@ namespace AvmController
 
         private void LaunchWithShimButton_Click(object sender, RoutedEventArgs e)
         {
-            var path = LaunchPathText.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(path))
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                var dialog = new Microsoft.Win32.OpenFileDialog
+                Title = "Launch with Shim — select executable",
+                Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*"
+            };
+
+            if (dialog.ShowDialog(this) != true) return;
+
+            var exePath  = dialog.FileName;
+            var fileName = System.IO.Path.GetFileName(exePath);
+            var outputTextBox = CreateOutputWindow(fileName);
+            AppendOutput(outputTextBox, $"Launching {fileName} with shim...{Environment.NewLine}");
+
+            TargetsList.Items.Add($"Launching {fileName} with shim…");
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
                 {
-                    Filter = "Executables (*.exe)|*.exe|All files (*.*)|*.*",
-                    Title  = "Select executable to launch with shim"
-                };
-                if (dialog.ShowDialog(this) != true) return;
-                path = dialog.FileName;
-                LaunchPathText.Text = path;
+                    var output = InjectionService.LaunchWithShimCaptured(
+                        exePath,
+                        out var pid,
+                        onOutputChunk: chunk => Dispatcher.Invoke(() => AppendOutput(outputTextBox, chunk)),
+                        onStatus: status => Dispatcher.Invoke(() => AppendStatus(outputTextBox, status)),
+                        onStarted: startedPid => Dispatcher.Invoke(() =>
+                        {
+                            TargetsList.Items.Add($"Shim launched → PID {startedPid}");
+                            AppendOutput(outputTextBox, $"PID {startedPid} started.{Environment.NewLine}");
+                        }));
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        TargetsList.Items.Add($"Shim run complete → PID was {pid}");
+                        if (!string.IsNullOrWhiteSpace(outputTextBox.Text)
+                            && !string.Equals(outputTextBox.Text.Trim(), output.Trim(), StringComparison.Ordinal))
+                        {
+                            AppendOutput(outputTextBox, Environment.NewLine);
+                            AppendOutput(outputTextBox, output);
+                        }
+                        else if (string.IsNullOrWhiteSpace(outputTextBox.Text))
+                        {
+                            AppendOutput(outputTextBox, output);
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        AppendOutput(outputTextBox, $"{Environment.NewLine}Launch failed: {ex.Message}{Environment.NewLine}");
+                        MessageBox.Show($"Launch failed: {ex.Message}", "Launch with Shim",
+                                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    });
+                }
+            });
+        }
+
+        private TextBox CreateOutputWindow(string title)
+        {
+            var tb = new System.Windows.Controls.TextBox
+            {
+                Text                          = string.Empty,
+                IsReadOnly                    = true,
+                FontFamily                    = new System.Windows.Media.FontFamily("Consolas"),
+                FontSize                      = 12,
+                Foreground                    = System.Windows.Media.Brushes.Black,
+                Background                    = System.Windows.Media.Brushes.White,
+                VerticalScrollBarVisibility   = System.Windows.Controls.ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                TextWrapping                  = System.Windows.TextWrapping.NoWrap
+            };
+            new Window
+            {
+                Title   = $"Output — {title}",
+                Width   = 920,
+                Height  = 640,
+                Owner   = this,
+                Content = tb,
+                Background = System.Windows.Media.Brushes.White
+            }.Show();
+            return tb;
+        }
+
+        private static void AppendOutput(TextBox tb, string content)
+        {
+            if (tb == null || string.IsNullOrEmpty(content))
+            {
+                return;
             }
 
-            try
+            tb.AppendText(content);
+            tb.CaretIndex = tb.Text.Length;
+            tb.ScrollToEnd();
+        }
+
+        private static void AppendStatus(TextBox tb, string status)
+        {
+            if (tb == null || string.IsNullOrWhiteSpace(status))
             {
-                var pid = InjectionService.LaunchWithShim(path);
-                TargetsList.Items.Add($"Launched with shim → PID {pid}  [{System.IO.Path.GetFileName(path)}]");
+                return;
             }
-            catch (Exception ex)
+
+            if (tb.Text.Length > 0 && !tb.Text.EndsWith(Environment.NewLine, StringComparison.Ordinal))
             {
-                MessageBox.Show($"Launch failed: {ex.Message}", "Launch with Shim", MessageBoxButton.OK, MessageBoxImage.Error);
+                tb.AppendText(Environment.NewLine);
             }
+
+            tb.AppendText(status + Environment.NewLine);
+            tb.CaretIndex = tb.Text.Length;
+            tb.ScrollToEnd();
         }
 
         private void AddHideRuleButton_Click(object sender, RoutedEventArgs e)
@@ -115,25 +237,6 @@ namespace AvmController
             });
 
             RulesList.Items.Add($"Hide: {match}");
-        }
-
-        private void AddRedirectRuleButton_Click(object sender, RoutedEventArgs e)
-        {
-            var match = MatchPathText.Text?.Trim() ?? string.Empty;
-            var redirect = RedirectPathText.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(match) || string.IsNullOrWhiteSpace(redirect))
-            {
-                return;
-            }
-
-            _fileRules.Add(new AvmFileRule
-            {
-                Action = 2,
-                MatchPath = match,
-                RedirectPath = redirect
-            });
-
-            RulesList.Items.Add($"Redirect: {match} -> {redirect}");
         }
 
         private void RemoveRuleButton_Click(object sender, RoutedEventArgs e)
@@ -186,6 +289,45 @@ namespace AvmController
             RefreshState();
         }
 
+        private void TryAutoApplyDefaultPolicy()
+        {
+            try
+            {
+                var policy = BuildPolicy();
+                var applied = false;
+
+                using (var kernel = new KernelClient())
+                {
+                    if (kernel.IsConnected)
+                    {
+                        kernel.SetPolicy(policy);
+                        kernel.ClearTargets();
+                        kernel.ClearFileRules();
+                        applied = true;
+                    }
+                }
+
+                using (var filter = new MiniFilterClient())
+                {
+                    if (filter.IsConnected)
+                    {
+                        filter.SetPolicy(policy, Array.Empty<AvmTargetEntry>(), Array.Empty<AvmFileRule>());
+                        applied = true;
+                    }
+                }
+
+                if (applied)
+                {
+                    TargetsList.Items.Add("Default full-concealment policy applied on startup");
+                    RefreshState();
+                }
+            }
+            catch (Exception ex)
+            {
+                TargetsList.Items.Add($"Auto-apply skipped: {ex.Message}");
+            }
+        }
+
         private void ExportLogsButton_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new SaveFileDialog
@@ -206,10 +348,10 @@ namespace AvmController
             }
 
             var builder = new StringBuilder();
-            builder.AppendLine("Timestamp,Source,Type,PID,TID,Mechanism,Original,Spoofed,Image");
+            builder.AppendLine("Timestamp,Source,Category,Type,PID,TID,Mechanism,Original,Spoofed,Image");
             foreach (var item in _telemetry)
             {
-                builder.AppendLine($"\"{item.Timestamp:o}\",\"{item.Source}\",\"{item.EventType}\",{item.ProcessId},{item.ThreadId},\"{item.Mechanism}\",\"{item.OriginalText}\",\"{item.SpoofedText}\",\"{item.ImagePath}\"");
+                builder.AppendLine($"\"{item.Timestamp:o}\",\"{item.Source}\",\"{item.QueryCategory}\",\"{item.EventType}\",{item.ProcessId},{item.ThreadId},\"{item.Mechanism}\",\"{item.OriginalText}\",\"{item.SpoofedText}\",\"{item.ImagePath}\"");
             }
             File.WriteAllText(dialog.FileName, builder.ToString());
         }
@@ -275,6 +417,7 @@ namespace AvmController
                 builder.Append("  {");
                 builder.AppendFormat("\"timestamp\":\"{0:o}\",", item.Timestamp);
                 builder.AppendFormat("\"source\":\"{0}\",", EscapeJson(item.Source));
+                builder.AppendFormat("\"category\":\"{0}\",", EscapeJson(item.QueryCategory));
                 builder.AppendFormat("\"eventType\":\"{0}\",", EscapeJson(item.EventType));
                 builder.AppendFormat("\"processId\":{0},", item.ProcessId);
                 builder.AppendFormat("\"threadId\":{0},", item.ThreadId);
@@ -297,18 +440,38 @@ namespace AvmController
             return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
+        private static string TryGetProcessName(uint pid)
+        {
+            try
+            {
+                var p = Process.GetProcessById((int)pid);
+                return p.ProcessName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void AppendEvents(IReadOnlyList<AvmEventRecord> events, string defaultSource)
         {
             foreach (var record in events)
             {
+                var imagePath = record.ImagePath;
+                if (string.IsNullOrWhiteSpace(imagePath) && record.ProcessId > 0)
+                {
+                    imagePath = TryGetProcessName(record.ProcessId) ?? $"PID {record.ProcessId}";
+                }
+
                 _telemetry.Insert(0, new TelemetryItem
                 {
                     Timestamp = DateTime.FromFileTimeUtc(record.Timestamp).ToLocalTime(),
                     Source = string.IsNullOrWhiteSpace(defaultSource) ? record.Source.ToString() : defaultSource,
+                    QueryCategory = ClassifyTelemetry(record),
                     EventType = record.Kind.ToString(),
                     ProcessId = record.ProcessId,
                     ThreadId = record.ThreadId,
-                    ImagePath = record.ImagePath,
+                    ImagePath = imagePath,
                     Mechanism = record.Mechanism,
                     OriginalText = record.OriginalText,
                     SpoofedText = record.SpoofedText,
@@ -321,6 +484,103 @@ namespace AvmController
             {
                 _telemetry.RemoveAt(_telemetry.Count - 1);
             }
+
+            _telemetryView.Refresh();
+        }
+
+        private bool FilterTelemetryItem(object obj)
+        {
+            if (!(obj is TelemetryItem item))
+            {
+                return false;
+            }
+
+            var filter = TelemetryFilterText?.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(filter))
+            {
+                return true;
+            }
+
+            filter = filter.ToLowerInvariant();
+            return ContainsFilter(item.Source, filter)
+                || ContainsFilter(item.QueryCategory, filter)
+                || ContainsFilter(item.ImagePath, filter)
+                || ContainsFilter(item.OriginalText, filter)
+                || ContainsFilter(item.SpoofedText, filter)
+                || item.ProcessId.ToString().Contains(filter);
+        }
+
+        private static bool ContainsFilter(string value, string filter)
+        {
+            return !string.IsNullOrWhiteSpace(value)
+                && value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void ApplyTelemetrySort(bool oldestFirst)
+        {
+            _telemetryView.SortDescriptions.Clear();
+            _telemetryView.SortDescriptions.Add(
+                new SortDescription(nameof(TelemetryItem.Timestamp),
+                    oldestFirst ? ListSortDirection.Ascending : ListSortDirection.Descending));
+        }
+
+        private static string ClassifyTelemetry(AvmEventRecord record)
+        {
+            var mechanism = record.Mechanism ?? string.Empty;
+            var original = record.OriginalText ?? string.Empty;
+            var combined = (mechanism + " " + original).ToLowerInvariant();
+
+            if (combined.Contains("firmware") || combined.Contains("smbios") || combined.Contains("bios")
+                || combined.Contains("serialnumber") || combined.Contains("systemmanufacturer"))
+            {
+                return "Firmware";
+            }
+
+            if (combined.Contains("cmcallback") || combined.Contains("reg") || combined.Contains("registry"))
+            {
+                return "Registry";
+            }
+
+            if (combined.Contains("openservice") || combined.Contains("enumservices"))
+            {
+                return "Service";
+            }
+
+            if (combined.Contains(@"\\.\") || combined.Contains("vmci") || combined.Contains("hgfs") || combined.Contains("device"))
+            {
+                return "Device";
+            }
+
+            if (combined.Contains("findfirstfile") || combined.Contains("findnextfile")
+                || combined.Contains("dircontrol") || combined.Contains("directory"))
+            {
+                return "Directory";
+            }
+
+            if (combined.Contains("process") || combined.Contains("toolhelp") || combined.Contains("snapshot"))
+            {
+                return "Process";
+            }
+
+            if (combined.Contains("sleep") || combined.Contains("tickcount") || combined.Contains("rdtsc")
+                || combined.Contains("performancecounter") || combined.Contains("timing"))
+            {
+                return "Timing";
+            }
+
+            if (combined.Contains("debug") || combined.Contains("beingdebugged") || combined.Contains("isdebuggerpresent"))
+            {
+                return "Debugger";
+            }
+
+            if (combined.Contains("createfile") || combined.Contains("networkqueryopen")
+                || combined.Contains(".sys") || combined.Contains(".dll") || combined.Contains(".exe")
+                || combined.Contains(@":\"))
+            {
+                return "File";
+            }
+
+            return "Other";
         }
     }
 }

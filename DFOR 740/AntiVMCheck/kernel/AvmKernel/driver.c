@@ -21,11 +21,20 @@ static PCWSTR gRegistryBlockLeaves[] = {
     L"vm3dmp",
     L"vmrawdsk",
     L"vmusbmouse",
+    L"vmmemctl",
+    L"vmx86",
     L"VGAuth",
+    L"VGAuthService",
+    L"VMUSBArbService",
     L"vm3dmp-debug",
     L"vm3dmp-stats",
     L"vm3dmp_loader",
     L"vmxnet3",
+    L"vmnet",
+    L"vmnetadapter",
+    L"vmnetbridge",
+    L"vmnetdhcp",
+    L"vmnetuserif",
     /* VirtualBox */
     L"VirtualBox",
     L"Oracle",
@@ -142,6 +151,12 @@ static const AVM_VALUE_SPOOF gValueSpoofs[] = {
     { L"\\BIOS",              L"BIOSVersion",        L"2.18.0" },
     { L"\\BIOS",              L"BaseBoardManufacturer", L"Dell Inc." },
     { L"\\BIOS",              L"BaseBoardProduct",   L"0XHGX6" },
+    { L"\\BIOS",              L"BaseBoardVersion",   L"A00" },
+    { L"\\BIOS",              L"BaseBoardSerialNumber", L"/8XH2GT1/CN1296374D00P6/" },
+    { L"\\BIOS",              L"SystemSKU",          L"09A0" },
+    { L"\\BIOS",              L"SystemVersion",      L"1.0" },
+    { L"\\BIOS",              L"SystemSerialNumber", L"8XH2GT1" },
+    { L"\\BIOS",              L"ChassisAssetTag",    L"Not Specified" },
     /* VirtualBox BIOS values (innotek/Oracle) */
     { L"\\BIOS",              L"BIOSReleaseDate",    L"09/17/2023" },
     { L"\\BIOS",              L"SystemFamily",       L"OptiPlex" },
@@ -149,6 +164,9 @@ static const AVM_VALUE_SPOOF gValueSpoofs[] = {
     { L"\\SystemInformation", L"BIOSVersion",        L"2.18.0" },
     { L"\\SystemInformation", L"SystemManufacturer", L"Dell Inc." },
     { L"\\SystemInformation", L"SystemProductName",  L"OptiPlex 7090" },
+    { L"\\SystemInformation", L"SystemSKU",          L"09A0" },
+    { L"\\SystemInformation", L"SystemVersion",      L"1.0" },
+    { L"\\SystemInformation", L"SystemFamily",       L"OptiPlex" },
 };
 #define AVM_VALUE_SPOOF_COUNT (sizeof(gValueSpoofs) / sizeof(gValueSpoofs[0]))
 
@@ -442,6 +460,8 @@ static VOID AvmResetState(VOID)
 static VOID AvmAppendEvent(_In_ ULONG Kind, _In_ ULONG Action, _In_opt_ PCWSTR Mechanism, _In_opt_ PCWSTR OriginalText, _In_opt_ PCWSTR SpoofedText)
 {
     PAVM_EVENT_RECORD record = NULL;
+    PEPROCESS process = PsGetCurrentProcess();
+    PUNICODE_STRING imageName = NULL;
 
     ExAcquireFastMutex(&gState.Guard);
 
@@ -470,6 +490,23 @@ static VOID AvmAppendEvent(_In_ ULONG Kind, _In_ ULONG Action, _In_opt_ PCWSTR M
 
     if (SpoofedText != NULL) {
         RtlStringCchCopyW(record->SpoofedText, AVM_MAX_TEXT_CHARS, SpoofedText);
+    }
+
+    /* Populate image path from process object */
+    if (process != NULL && NT_SUCCESS(SeLocateProcessImageName(process, &imageName)) && imageName != NULL) {
+        USHORT srcLen = imageName->Length / sizeof(WCHAR);
+        USHORT dstMax = AVM_MAX_PATH_CHARS - 1;
+        /* Extract just the filename (after last backslash) for readability */
+        USHORT i;
+        USHORT lastSlash = 0;
+        for (i = 0; i < srcLen; i++) {
+            if (imageName->Buffer[i] == L'\\') lastSlash = i + 1;
+        }
+        srcLen = srcLen - lastSlash;
+        if (srcLen > dstMax) srcLen = dstMax;
+        RtlCopyMemory(record->ImagePath, imageName->Buffer + lastSlash, srcLen * sizeof(WCHAR));
+        record->ImagePath[srcLen] = L'\0';
+        ExFreePool(imageName);
     }
 
     ExReleaseFastMutex(&gState.Guard);

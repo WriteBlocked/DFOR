@@ -40,32 +40,36 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <GroupBox Header="Targets" Margin="0,0,12,0">
+            <GroupBox Header="Target Processes" Margin="0,0,12,0">
                 <DockPanel Margin="8">
                     <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Text="Add a process that should receive concealment. In Full Concealment mode, you usually do not need targets."
+                                   TextWrapping="Wrap" Margin="0,0,0,8" />
                         <ComboBox x:Name="TargetKindCombo" SelectedIndex="0" Margin="0,0,0,8">
                             <ComboBoxItem Content="PID" />
                             <ComboBoxItem Content="Image Name" />
                             <ComboBoxItem Content="Image Path Prefix" />
                         </ComboBox>
-                        <TextBox x:Name="TargetValueText" Margin="0,0,0,8" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <Button Width="140" Margin="0,0,8,0" Content="Add Target" Click="AddTargetButton_Click" />
-                            <Button Width="140" Content="Inject into PID" Click="InjectShimButton_Click" ToolTip="Inject the shim DLL into an already-running process by PID" />
+                        <TextBox x:Name="TargetValueText" Margin="0,0,0,8"
+                                 ToolTip="Enter the process to protect from seeing VM artifacts: a PID, image name like malware.exe, or a path prefix" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Width="140" Margin="0,0,8,0" Content="Add Target" Click="AddTargetButton_Click"
+                                    ToolTip="Register a process that should receive concealment" />
+                            <Button Width="140" Content="Inject Shim" Click="InjectShimButton_Click"
+                                    ToolTip="Inject the shim DLL into a running process by PID" />
                         </StackPanel>
-                        <Separator Margin="0,0,0,8" />
-                        <TextBlock Text="Launch with shim pre-injected:" FontSize="11" Foreground="Gray" Margin="0,0,0,4" />
-                        <TextBox x:Name="LaunchPathText" Margin="0,0,0,8" ToolTip="Executable path — leave blank to browse" />
-                        <Button Width="200" HorizontalAlignment="Left" Content="Launch with Shim" Click="LaunchWithShimButton_Click"
-                                ToolTip="Start the executable suspended, inject the shim before any code runs, then resume" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Width="290" Content="Launch with Shim…" Click="LaunchWithShimButton_Click"
+                                    ToolTip="Browse for an exe, launch it suspended, inject the shim, then resume" />
+                        </StackPanel>
                     </StackPanel>
-                    <ListBox x:Name="TargetsList" Margin="0,12,0,0" />
+                    <ListBox x:Name="TargetsList" Margin="0,8,0,0" />
                 </DockPanel>
             </GroupBox>
 
             <GroupBox Header="Modes and Checks" Grid.Column="1" Margin="0,0,12,0">
                 <StackPanel Margin="8">
-                    <ComboBox x:Name="ModeCombo" SelectedIndex="1" Margin="0,0,0,12">
+                    <ComboBox x:Name="ModeCombo" SelectedIndex="2" Margin="0,0,0,12">
                         <ComboBoxItem Content="Observe" />
                         <ComboBoxItem Content="Selective Concealment" />
                         <ComboBoxItem Content="Full Concealment" />
@@ -84,13 +88,10 @@
             <GroupBox Header="File Rules" Grid.Column="2">
                 <DockPanel Margin="8">
                     <StackPanel DockPanel.Dock="Top">
-                        <TextBlock Text="Path to hide or redirect:" FontSize="11" Foreground="Gray" Margin="0,0,0,2" />
+                        <TextBlock Text="Path to hide:" FontSize="11" Foreground="Gray" Margin="0,0,0,2" />
                         <TextBox x:Name="MatchPathText" Margin="0,0,0,8" ToolTip="e.g. C:\Windows\System32\drivers\vmci.sys" />
-                        <TextBlock Text="Redirect target (optional, for redirect rules only):" FontSize="11" Foreground="Gray" Margin="0,0,0,2" />
-                        <TextBox x:Name="RedirectPathText" Margin="0,0,0,8" ToolTip="e.g. C:\Windows\System32\drivers\dummy.sys" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <Button Width="120" Margin="0,0,8,0" Content="Add Hide Rule" Click="AddHideRuleButton_Click" ToolTip="Makes the file appear nonexistent" />
-                            <Button Width="140" Margin="0,0,8,0" Content="Add Redirect Rule" Click="AddRedirectRuleButton_Click" ToolTip="Redirects file access to a different path" />
                             <Button Width="120" Margin="0,0,8,0" Content="Remove Selected" Click="RemoveRuleButton_Click" ToolTip="Remove the selected rule from the list" />
                             <Button Width="100" Content="Clear Rules" Click="ClearRulesButton_Click" ToolTip="Remove all custom file rules" />
                         </StackPanel>
@@ -104,19 +105,28 @@
         </Grid>
 
         <GroupBox Grid.Row="2" Header="Telemetry">
-            <DataGrid x:Name="TelemetryGrid" AutoGenerateColumns="False" IsReadOnly="True" ItemsSource="{Binding Telemetry}">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock VerticalAlignment="Center" Margin="0,0,8,0" Text="Filter:" />
+                    <TextBox x:Name="TelemetryFilterText" Width="280" Margin="0,0,8,0"
+                             ToolTip="Filter by source, PID, process, original text, or spoofed text"
+                             TextChanged="TelemetryFilterText_TextChanged" />
+                    <Button Width="110" Margin="0,0,8,0" Content="Newest First" Click="SortTelemetryNewest_Click" />
+                    <Button Width="110" Margin="0,0,8,0" Content="Oldest First" Click="SortTelemetryOldest_Click" />
+                    <Button Width="90" Content="Clear" Click="ClearTelemetryButton_Click" />
+                </StackPanel>
+                <DataGrid x:Name="TelemetryGrid" AutoGenerateColumns="False" IsReadOnly="True" ItemsSource="{Binding Telemetry}">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="160" />
                     <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="90" />
-                    <DataGridTextColumn Header="Type" Binding="{Binding EventType}" Width="140" />
+                    <DataGridTextColumn Header="Category" Binding="{Binding QueryCategory}" Width="110" />
                     <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="70" />
-                    <DataGridTextColumn Header="TID" Binding="{Binding ThreadId}" Width="70" />
-                    <DataGridTextColumn Header="Mechanism" Binding="{Binding Mechanism}" Width="160" />
                     <DataGridTextColumn Header="Original" Binding="{Binding OriginalText}" Width="200" />
                     <DataGridTextColumn Header="Spoofed" Binding="{Binding SpoofedText}" Width="200" />
-                    <DataGridTextColumn Header="Image" Binding="{Binding ImagePath}" Width="*" />
+                    <DataGridTextColumn Header="Process" Binding="{Binding ImagePath}" Width="*" />
                 </DataGrid.Columns>
-            </DataGrid>
+                </DataGrid>
+            </DockPanel>
         </GroupBox>
     </Grid>
 </Window>

@@ -9,6 +9,8 @@
 #include <winternl.h>
 #include <strsafe.h>
 #include <TlHelp32.h>
+#include <winsvc.h>
+#include <stdio.h>
 #include "..\..\shared\avm_shared.h"
 
 #pragma warning(disable:4996)  /* stricmp/wcsicmp */
@@ -26,6 +28,8 @@ typedef LSTATUS   (WINAPI *Fn_RegQueryValueExA)(HKEY, LPCSTR, LPDWORD, LPDWORD, 
 typedef LSTATUS   (WINAPI *Fn_RegQueryValueExW)(HKEY, LPCWSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
 typedef HANDLE    (WINAPI *Fn_CreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE    (WINAPI *Fn_CreateFileW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+typedef SC_HANDLE (WINAPI *Fn_OpenServiceA)(SC_HANDLE, LPCSTR, DWORD);
+typedef SC_HANDLE (WINAPI *Fn_OpenServiceW)(SC_HANDLE, LPCWSTR, DWORD);
 typedef DWORD     (WINAPI *Fn_GetFileAttributesA)(LPCSTR);
 typedef DWORD     (WINAPI *Fn_GetFileAttributesW)(LPCWSTR);
 typedef SHORT     (WINAPI *Fn_GetAsyncKeyState)(int);
@@ -35,8 +39,19 @@ typedef BOOL      (WINAPI *Fn_QueryPerformanceCounter)(LARGE_INTEGER*);
 typedef FARPROC   (WINAPI *Fn_GetProcAddress)(HMODULE, LPCSTR);
 typedef NTSTATUS  (NTAPI *Fn_NtQueryInformationProcess)(HANDLE, ULONG, PVOID, ULONG, PULONG);
 typedef NTSTATUS  (NTAPI *Fn_NtQuerySystemInformation)(ULONG, PVOID, ULONG, PULONG);
-typedef int       (WINAPI *Fn_MessageBoxA)(HWND, LPCSTR, LPCSTR, UINT);
-typedef int       (WINAPI *Fn_MessageBoxW)(HWND, LPCWSTR, LPCWSTR, UINT);
+typedef BOOL      (WINAPI *Fn_GetCursorPos)(LPPOINT);
+typedef HANDLE    (WINAPI *Fn_FindFirstFileA)(LPCSTR, WIN32_FIND_DATAA*);
+typedef HANDLE    (WINAPI *Fn_FindFirstFileW)(LPCWSTR, WIN32_FIND_DATAW*);
+typedef BOOL      (WINAPI *Fn_FindNextFileA)(HANDLE, WIN32_FIND_DATAA*);
+typedef BOOL      (WINAPI *Fn_FindNextFileW)(HANDLE, WIN32_FIND_DATAW*);
+typedef BOOL      (WINAPI *Fn_FindClose)(HANDLE);
+typedef BOOL      (WINAPI *Fn_Process32FirstW)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL      (WINAPI *Fn_Process32NextW)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL      (WINAPI *Fn_EnumServicesStatusExA)(SC_HANDLE, SC_ENUM_TYPE, DWORD, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD, LPDWORD, LPCSTR);
+typedef BOOL      (WINAPI *Fn_EnumServicesStatusExW)(SC_HANDLE, SC_ENUM_TYPE, DWORD, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD, LPDWORD, LPCWSTR);
+typedef UINT      (WINAPI *Fn_GetSystemFirmwareTable)(DWORD, DWORD, PVOID, DWORD);
+typedef BOOL      (WINAPI *Fn_WriteConsoleA)(HANDLE, const VOID*, DWORD, LPDWORD, LPVOID);
+typedef BOOL      (WINAPI *Fn_WriteConsoleW)(HANDLE, const VOID*, DWORD, LPDWORD, LPVOID);
 
 /* ═══════════════════════════════════════════════════════════════════
  * Original function pointer globals  (set once before IAT patching)
@@ -51,6 +66,8 @@ static Fn_RegQueryValueExA              gOrig_RegQueryValueExA              = nu
 static Fn_RegQueryValueExW              gOrig_RegQueryValueExW              = nullptr;
 static Fn_CreateFileA                   gOrig_CreateFileA                   = nullptr;
 static Fn_CreateFileW                   gOrig_CreateFileW                   = nullptr;
+static Fn_OpenServiceA                  gOrig_OpenServiceA                  = nullptr;
+static Fn_OpenServiceW                  gOrig_OpenServiceW                  = nullptr;
 static Fn_GetFileAttributesA            gOrig_GetFileAttributesA            = nullptr;
 static Fn_GetFileAttributesW            gOrig_GetFileAttributesW            = nullptr;
 static Fn_GetAsyncKeyState              gOrig_GetAsyncKeyState              = nullptr;
@@ -60,11 +77,33 @@ static Fn_QueryPerformanceCounter       gOrig_QueryPerformanceCounter       = nu
 static Fn_GetProcAddress                gOrig_GetProcAddress                = nullptr;
 static Fn_NtQueryInformationProcess     gOrig_NtQueryInformationProcess     = nullptr;
 static Fn_NtQuerySystemInformation      gOrig_NtQuerySystemInformation      = nullptr;
-static Fn_MessageBoxA                   gOrig_MessageBoxA                   = nullptr;
-static Fn_MessageBoxW                   gOrig_MessageBoxW                   = nullptr;
+static Fn_GetCursorPos                  gOrig_GetCursorPos                  = nullptr;
+static Fn_FindFirstFileA                gOrig_FindFirstFileA                = nullptr;
+static Fn_FindFirstFileW                gOrig_FindFirstFileW                = nullptr;
+static Fn_FindNextFileA                 gOrig_FindNextFileA                 = nullptr;
+static Fn_FindNextFileW                 gOrig_FindNextFileW                 = nullptr;
+static Fn_FindClose                     gOrig_FindClose                     = nullptr;
+static Fn_Process32FirstW               gOrig_Process32FirstW               = nullptr;
+static Fn_Process32NextW                gOrig_Process32NextW                = nullptr;
+static Fn_EnumServicesStatusExA         gOrig_EnumServicesStatusExA         = nullptr;
+static Fn_EnumServicesStatusExW         gOrig_EnumServicesStatusExW         = nullptr;
+static Fn_GetSystemFirmwareTable        gOrig_GetSystemFirmwareTable        = nullptr;
+static Fn_WriteConsoleA                 gOrig_WriteConsoleA                 = nullptr;
+static Fn_WriteConsoleW                 gOrig_WriteConsoleW                 = nullptr;
 
 /* Mouse activity simulation state */
 static volatile LONG gMouseCallCount = 0;
+
+static void DisableStdIoBuffering(void)
+{
+    if (stdout) {
+        setvbuf(stdout, nullptr, _IONBF, 0);
+    }
+
+    if (stderr) {
+        setvbuf(stderr, nullptr, _IONBF, 0);
+    }
+}
 
 /* Uptime padding: add 4 hours so sandbox uptime checks pass */
 #define AVM_UPTIME_OFFSET_MS  (4UL * 3600UL * 1000UL)
@@ -134,6 +173,11 @@ static const char* const kVmRegSubstringsA[] = {
     "vmtools",
     "vmx_svga",
     "vmxnet",
+    "vmx86",
+    "vmmemctl",
+    "vgauth",
+    "vmusbarb",
+    "vmnet",
     "vboxguest",
     "vboxmouse",
     "vboxsf",
@@ -152,6 +196,11 @@ static const wchar_t* const kVmRegSubstringsW[] = {
     L"vmtools",
     L"vmx_svga",
     L"vmxnet",
+    L"vmx86",
+    L"vmmemctl",
+    L"vgauth",
+    L"vmusbarb",
+    L"vmnet",
     L"vboxguest",
     L"vboxmouse",
     L"vboxsf",
@@ -170,12 +219,20 @@ static const char* const kVmFileSubstringsA[] = {
     "\\drivers\\vmxnet",
     "\\drivers\\vmrawdsk.sys",
     "\\drivers\\vmusbmouse.sys",
+    "\\drivers\\vmmemctl.sys",
+    "\\drivers\\vmx86.sys",
     "\\drivers\\vmx_svga.sys",
     "\\drivers\\vboxguest.sys",
     "\\drivers\\vboxmouse.sys",
     "\\drivers\\vboxsf.sys",
     "\\drivers\\vboxvideo.sys",
     "\\drivers\\vboxwddm.sys",
+    "\\vboxcontrol.exe",
+    "\\vboxservice.exe",
+    "\\vboxtray.exe",
+    "\\vboxdisp.dll",
+    "\\vboxhook.dll",
+    "\\vboxogl.dll",
     "program files\\vmware",
     "program files\\oracle\\virtualbox",
     nullptr
@@ -190,12 +247,20 @@ static const wchar_t* const kVmFileSubstringsW[] = {
     L"\\drivers\\vmxnet",
     L"\\drivers\\vmrawdsk.sys",
     L"\\drivers\\vmusbmouse.sys",
+    L"\\drivers\\vmmemctl.sys",
+    L"\\drivers\\vmx86.sys",
     L"\\drivers\\vmx_svga.sys",
     L"\\drivers\\vboxguest.sys",
     L"\\drivers\\vboxmouse.sys",
     L"\\drivers\\vboxsf.sys",
     L"\\drivers\\vboxvideo.sys",
     L"\\drivers\\vboxwddm.sys",
+    L"\\vboxcontrol.exe",
+    L"\\vboxservice.exe",
+    L"\\vboxtray.exe",
+    L"\\vboxdisp.dll",
+    L"\\vboxhook.dll",
+    L"\\vboxogl.dll",
     L"\\program files\\vmware",
     L"\\program files\\oracle\\virtualbox",
     nullptr
@@ -207,9 +272,16 @@ static const char* const kVmDevicesA[] = {
     "\\\\.\\vmci",
     "\\\\.\\vmcihostdev",
     "\\\\.\\vmmemctl",
+    "\\\\.\\vmx86",
+    "\\\\.\\vmmouse",
     "\\\\.\\vmx_svga",
     "\\\\.\\vboxguest",
     "\\\\.\\vboxminidrv",
+    "\\\\.\\vboxminirdrdn",
+    "\\\\.\\vboxtrayipc",
+    "\\\\.\\vboxminirdr",
+    "\\\\.\\vboxvideo",
+    "\\\\.\\pipe\\vboxtrayipc",
     nullptr
 };
 
@@ -219,9 +291,59 @@ static const wchar_t* const kVmDevicesW[] = {
     L"\\\\.\\vmci",
     L"\\\\.\\vmcihostdev",
     L"\\\\.\\vmmemctl",
+    L"\\\\.\\vmx86",
+    L"\\\\.\\vmmouse",
     L"\\\\.\\vmx_svga",
     L"\\\\.\\vboxguest",
     L"\\\\.\\vboxminidrv",
+    L"\\\\.\\vboxminirdrdn",
+    L"\\\\.\\vboxtrayipc",
+    L"\\\\.\\vboxminirdr",
+    L"\\\\.\\vboxvideo",
+    L"\\\\.\\pipe\\vboxtrayipc",
+    nullptr
+};
+
+/* VM service names to hide — exact case-insensitive match */
+static const char* const kVmServiceNamesA[] = {
+    "vmci", "vmhgfs", "vmmouse", "vmx_svga", "vmxnet", "vmxnet3",
+    "VMTools", "vmtools", "vmvss", "vm3dmp", "vm3dmp_loader",
+    "vmrawdsk", "vmusbmouse", "vmmemctl", "vmx86",
+    "VGAuthService", "VMUSBArbService", "vmnetbridge", "vmnetuserif",
+    "vmnetadapter", "vmnetdhcp",
+    "VBoxGuest", "VBoxMouse", "VBoxSF", "VBoxVideo",
+    "VBoxService", "VBoxWddm",
+    nullptr
+};
+static const wchar_t* const kVmServiceNamesW[] = {
+    L"vmci", L"vmhgfs", L"vmmouse", L"vmx_svga", L"vmxnet", L"vmxnet3",
+    L"VMTools", L"vmtools", L"vmvss", L"vm3dmp", L"vm3dmp_loader",
+    L"vmrawdsk", L"vmusbmouse", L"vmmemctl", L"vmx86",
+    L"VGAuthService", L"VMUSBArbService", L"vmnetbridge", L"vmnetuserif",
+    L"vmnetadapter", L"vmnetdhcp",
+    L"VBoxGuest", L"VBoxMouse", L"VBoxSF", L"VBoxVideo",
+    L"VBoxService", L"VBoxWddm",
+    nullptr
+};
+
+/* VM artifact file names (basename only) — used by FindFirstFile/FindNextFile hooks */
+static const char* const kVmFileNamesA[] = {
+    "vmmouse.sys", "vmhgfs.sys", "vmci.sys", "vm3dmp.sys",
+    "vmxnet.sys", "vmx_svga.sys", "vmrawdsk.sys", "vmusbmouse.sys",
+    "vmmemctl.sys", "vmx86.sys",
+    "vboxguest.sys", "vboxmouse.sys", "vboxsf.sys", "vboxvideo.sys", "vboxwddm.sys",
+    "vboxcontrol.exe", "vboxservice.exe", "vboxtray.exe",
+    "vboxdisp.dll", "vboxhook.dll", "vboxogl.dll",
+    nullptr
+};
+
+static const wchar_t* const kVmFileNamesW[] = {
+    L"vmmouse.sys", L"vmhgfs.sys", L"vmci.sys", L"vm3dmp.sys",
+    L"vmxnet.sys", L"vmx_svga.sys", L"vmrawdsk.sys", L"vmusbmouse.sys",
+    L"vmmemctl.sys", L"vmx86.sys",
+    L"vboxguest.sys", L"vboxmouse.sys", L"vboxsf.sys", L"vboxvideo.sys", L"vboxwddm.sys",
+    L"vboxcontrol.exe", L"vboxservice.exe", L"vboxtray.exe",
+    L"vboxdisp.dll", L"vboxhook.dll", L"vboxogl.dll",
     nullptr
 };
 
@@ -315,6 +437,87 @@ static bool IsVmDeviceW(const wchar_t* path)
     for (int i = 0; kVmDevicesW[i]; ++i)
         if (_wcsicmp(path, kVmDevicesW[i]) == 0) return true;
     return false;
+}
+
+static bool IsVmServiceNameA(const char* name)
+{
+    if (!name) return false;
+    for (int i = 0; kVmServiceNamesA[i]; ++i)
+        if (_stricmp(name, kVmServiceNamesA[i]) == 0) return true;
+    return false;
+}
+
+static bool IsVmServiceNameW(const wchar_t* name)
+{
+    if (!name) return false;
+    for (int i = 0; kVmServiceNamesW[i]; ++i)
+        if (_wcsicmp(name, kVmServiceNamesW[i]) == 0) return true;
+    return false;
+}
+
+/* True if the basename-only name matches a VM artifact */
+static bool ShouldHideFileNameA(const char* name)
+{
+    if (!name) return false;
+    for (int i = 0; kVmFileNamesA[i]; ++i)
+        if (_stricmp(name, kVmFileNamesA[i]) == 0) return true;
+    return IsVmFilePathA(name);
+}
+
+static bool ShouldHideFileNameW(const wchar_t* name)
+{
+    if (!name) return false;
+    for (int i = 0; kVmFileNamesW[i]; ++i)
+        if (_wcsicmp(name, kVmFileNamesW[i]) == 0) return true;
+    return IsVmFilePathW(name);
+}
+
+/* ─── Filtered-find tracking ─── */
+#define AVM_MAX_FILTERED_FINDS 64
+struct AvmFindSlot { HANDLE h; bool active; };
+static AvmFindSlot      gFilteredFinds[AVM_MAX_FILTERED_FINDS];
+static CRITICAL_SECTION gFindCS;
+static LONG             gFindCSInit = 0;
+
+static void EnsureFindCS()
+{
+    if (InterlockedCompareExchange(&gFindCSInit, 1, 0) == 0)
+        InitializeCriticalSection(&gFindCS);
+}
+
+static void TrackFilteredFind(HANDLE h)
+{
+    EnsureFindCS();
+    EnterCriticalSection(&gFindCS);
+    for (int i = 0; i < AVM_MAX_FILTERED_FINDS; ++i) {
+        if (!gFilteredFinds[i].active) { gFilteredFinds[i] = { h, true }; break; }
+    }
+    LeaveCriticalSection(&gFindCS);
+}
+
+static bool IsFilteredFind(HANDLE h)
+{
+    if (!gFindCSInit) return false;
+    EnterCriticalSection(&gFindCS);
+    bool found = false;
+    for (int i = 0; i < AVM_MAX_FILTERED_FINDS; ++i) {
+        if (gFilteredFinds[i].active && gFilteredFinds[i].h == h) { found = true; break; }
+    }
+    LeaveCriticalSection(&gFindCS);
+    return found;
+}
+
+static void UntrackFilteredFind(HANDLE h)
+{
+    if (!gFindCSInit) return;
+    EnterCriticalSection(&gFindCS);
+    for (int i = 0; i < AVM_MAX_FILTERED_FINDS; ++i) {
+        if (gFilteredFinds[i].active && gFilteredFinds[i].h == h) {
+            gFilteredFinds[i].active = false;
+            break;
+        }
+    }
+    LeaveCriticalSection(&gFindCS);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -436,6 +639,30 @@ static LSTATUS WINAPI Hook_RegQueryValueExW(
     return RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
 }
 
+static SC_HANDLE WINAPI Hook_OpenServiceA(SC_HANDLE hSCManager, LPCSTR lpServiceName, DWORD dwDesiredAccess)
+{
+    if (IsVmServiceNameA(lpServiceName)) {
+        SubmitRuntimeEvent(AvmEventFileProbe, AvmActionBlock,
+            L"OpenServiceA", L"vm-service", L"hidden", 0, 0);
+        SetLastError(ERROR_SERVICE_DOES_NOT_EXIST);
+        return NULL;
+    }
+    if (gOrig_OpenServiceA) return gOrig_OpenServiceA(hSCManager, lpServiceName, dwDesiredAccess);
+    return OpenServiceA(hSCManager, lpServiceName, dwDesiredAccess);
+}
+
+static SC_HANDLE WINAPI Hook_OpenServiceW(SC_HANDLE hSCManager, LPCWSTR lpServiceName, DWORD dwDesiredAccess)
+{
+    if (IsVmServiceNameW(lpServiceName)) {
+        SubmitRuntimeEvent(AvmEventFileProbe, AvmActionBlock,
+            L"OpenServiceW", lpServiceName ? lpServiceName : L"?", L"hidden", 0, 0);
+        SetLastError(ERROR_SERVICE_DOES_NOT_EXIST);
+        return NULL;
+    }
+    if (gOrig_OpenServiceW) return gOrig_OpenServiceW(hSCManager, lpServiceName, dwDesiredAccess);
+    return OpenServiceW(hSCManager, lpServiceName, dwDesiredAccess);
+}
+
 static HANDLE WINAPI Hook_CreateFileA(
     LPCSTR lpFileName, DWORD dwAccess, DWORD dwShare,
     LPSECURITY_ATTRIBUTES lpSA, DWORD dwCreation, DWORD dwFlags, HANDLE hTemplate)
@@ -495,6 +722,204 @@ static DWORD WINAPI Hook_GetFileAttributesW(LPCWSTR lpFileName)
     }
     if (gOrig_GetFileAttributesW) return gOrig_GetFileAttributesW(lpFileName);
     return GetFileAttributesW(lpFileName);
+}
+
+/* ─── FindFirstFileA / FindFirstFileW ─── */
+
+static HANDLE WINAPI Hook_FindFirstFileA(LPCSTR lpFileName, WIN32_FIND_DATAA* lpFindFileData)
+{
+    if (IsVmFilePathA(lpFileName)) {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return INVALID_HANDLE_VALUE;
+    }
+    HANDLE h = gOrig_FindFirstFileA
+        ? gOrig_FindFirstFileA(lpFileName, lpFindFileData)
+        : ::FindFirstFileA(lpFileName, lpFindFileData);
+    if (h == INVALID_HANDLE_VALUE || !lpFindFileData) return h;
+    /* Skip VM entries at the head of the result set */
+    while (ShouldHideFileNameA(lpFindFileData->cFileName)) {
+        BOOL more = gOrig_FindNextFileA
+            ? gOrig_FindNextFileA(h, lpFindFileData)
+            : ::FindNextFileA(h, lpFindFileData);
+        if (!more) {
+            gOrig_FindClose ? gOrig_FindClose(h) : ::FindClose(h);
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return INVALID_HANDLE_VALUE;
+        }
+    }
+    TrackFilteredFind(h);
+    return h;
+}
+
+static HANDLE WINAPI Hook_FindFirstFileW(LPCWSTR lpFileName, WIN32_FIND_DATAW* lpFindFileData)
+{
+    if (IsVmFilePathW(lpFileName)) {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return INVALID_HANDLE_VALUE;
+    }
+    HANDLE h = gOrig_FindFirstFileW
+        ? gOrig_FindFirstFileW(lpFileName, lpFindFileData)
+        : ::FindFirstFileW(lpFileName, lpFindFileData);
+    if (h == INVALID_HANDLE_VALUE || !lpFindFileData) return h;
+    while (ShouldHideFileNameW(lpFindFileData->cFileName)) {
+        BOOL more = gOrig_FindNextFileW
+            ? gOrig_FindNextFileW(h, lpFindFileData)
+            : ::FindNextFileW(h, lpFindFileData);
+        if (!more) {
+            gOrig_FindClose ? gOrig_FindClose(h) : ::FindClose(h);
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return INVALID_HANDLE_VALUE;
+        }
+    }
+    TrackFilteredFind(h);
+    return h;
+}
+
+/* ─── FindNextFileA / FindNextFileW ─── */
+
+static BOOL WINAPI Hook_FindNextFileA(HANDLE hFindFile, WIN32_FIND_DATAA* lpFindFileData)
+{
+    if (!IsFilteredFind(hFindFile)) {
+        return gOrig_FindNextFileA
+            ? gOrig_FindNextFileA(hFindFile, lpFindFileData)
+            : ::FindNextFileA(hFindFile, lpFindFileData);
+    }
+    for (;;) {
+        BOOL ok = gOrig_FindNextFileA
+            ? gOrig_FindNextFileA(hFindFile, lpFindFileData)
+            : ::FindNextFileA(hFindFile, lpFindFileData);
+        if (!ok) return FALSE;
+        if (!ShouldHideFileNameA(lpFindFileData->cFileName)) return TRUE;
+    }
+}
+
+static BOOL WINAPI Hook_FindNextFileW(HANDLE hFindFile, WIN32_FIND_DATAW* lpFindFileData)
+{
+    if (!IsFilteredFind(hFindFile)) {
+        return gOrig_FindNextFileW
+            ? gOrig_FindNextFileW(hFindFile, lpFindFileData)
+            : ::FindNextFileW(hFindFile, lpFindFileData);
+    }
+    for (;;) {
+        BOOL ok = gOrig_FindNextFileW
+            ? gOrig_FindNextFileW(hFindFile, lpFindFileData)
+            : ::FindNextFileW(hFindFile, lpFindFileData);
+        if (!ok) return FALSE;
+        if (!ShouldHideFileNameW(lpFindFileData->cFileName)) return TRUE;
+    }
+}
+
+/* ─── FindClose ─── */
+
+static BOOL WINAPI Hook_FindClose(HANDLE hFindFile)
+{
+    UntrackFilteredFind(hFindFile);
+    return gOrig_FindClose ? gOrig_FindClose(hFindFile) : ::FindClose(hFindFile);
+}
+
+/* ─── EnumServicesStatusExA / EnumServicesStatusExW ─── */
+
+static BOOL WINAPI Hook_EnumServicesStatusExA(
+    SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel,
+    DWORD dwServiceType, DWORD dwServiceState,
+    LPBYTE lpServices, DWORD cbBufSize,
+    LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned,
+    LPDWORD lpResumeHandle, LPCSTR pszGroupName)
+{
+    BOOL ok = gOrig_EnumServicesStatusExA
+        ? gOrig_EnumServicesStatusExA(hSCManager, InfoLevel, dwServiceType, dwServiceState,
+                                       lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned,
+                                       lpResumeHandle, pszGroupName)
+        : ::EnumServicesStatusExA(hSCManager, InfoLevel, dwServiceType, dwServiceState,
+                                   lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned,
+                                   lpResumeHandle, pszGroupName);
+    if (!ok || !lpServices || !lpServicesReturned || *lpServicesReturned == 0) return ok;
+    if (InfoLevel != SC_ENUM_PROCESS_INFO) return ok;
+    auto* arr  = (ENUM_SERVICE_STATUS_PROCESSA*)lpServices;
+    DWORD n    = *lpServicesReturned;
+    DWORD wIdx = 0;
+    for (DWORD i = 0; i < n; ++i) {
+        if (!arr[i].lpServiceName || !IsVmServiceNameA(arr[i].lpServiceName)) {
+            if (wIdx != i) arr[wIdx] = arr[i];
+            ++wIdx;
+        }
+    }
+    *lpServicesReturned = wIdx;
+    return ok;
+}
+
+static BOOL WINAPI Hook_EnumServicesStatusExW(
+    SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel,
+    DWORD dwServiceType, DWORD dwServiceState,
+    LPBYTE lpServices, DWORD cbBufSize,
+    LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned,
+    LPDWORD lpResumeHandle, LPCWSTR pszGroupName)
+{
+    BOOL ok = gOrig_EnumServicesStatusExW
+        ? gOrig_EnumServicesStatusExW(hSCManager, InfoLevel, dwServiceType, dwServiceState,
+                                       lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned,
+                                       lpResumeHandle, pszGroupName)
+        : ::EnumServicesStatusExW(hSCManager, InfoLevel, dwServiceType, dwServiceState,
+                                   lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned,
+                                   lpResumeHandle, pszGroupName);
+    if (!ok || !lpServices || !lpServicesReturned || *lpServicesReturned == 0) return ok;
+    if (InfoLevel != SC_ENUM_PROCESS_INFO) return ok;
+    auto* arr  = (ENUM_SERVICE_STATUS_PROCESSW*)lpServices;
+    DWORD n    = *lpServicesReturned;
+    DWORD wIdx = 0;
+    for (DWORD i = 0; i < n; ++i) {
+        if (!arr[i].lpServiceName || !IsVmServiceNameW(arr[i].lpServiceName)) {
+            if (wIdx != i) arr[wIdx] = arr[i];
+            ++wIdx;
+        }
+    }
+    *lpServicesReturned = wIdx;
+    return ok;
+}
+
+/* ─── GetSystemFirmwareTable — scrub VMware/VirtualBox strings from SMBIOS ─── */
+/* CRITICAL: each replacement must be the SAME byte length as its search string. */
+static UINT WINAPI Hook_GetSystemFirmwareTable(
+    DWORD FirmwareTableProviderSignature, DWORD FirmwareTableID,
+    PVOID pFirmwareTableBuffer, DWORD BufferSize)
+{
+    UINT result = gOrig_GetSystemFirmwareTable
+        ? gOrig_GetSystemFirmwareTable(FirmwareTableProviderSignature, FirmwareTableID,
+                                        pFirmwareTableBuffer, BufferSize)
+        : ::GetSystemFirmwareTable(FirmwareTableProviderSignature, FirmwareTableID,
+                                    pFirmwareTableBuffer, BufferSize);
+    if (!result || !pFirmwareTableBuffer || !BufferSize) return result;
+
+    struct FwEntry { const char* find; const char* replace; };
+    static const FwEntry kFwReplace[] = {
+        /* 12-char: */ { "VMware, Inc.", "Dell Inc.   " },
+        /* 11-char: */ { "VMware Inc.", "Dell Inc.  " },
+        /* 10-char: */ { "VirtualBox",  "Dell Inc. " },
+        /* 10-char: */ { "VMware Inc",  "Dell Inc. " },
+        /*  7-char: */ { "VMware-",     "SERIAL-"    },
+        /*  6-char: */ { "VMware",      "Dell  "     },
+        /*  6-char: */ { "VMWARE",      "DELL  "     },
+        /*  4-char: */ { "VBox",        "Dell"       },
+        /*  4-char: */ { "vbox",        "dell"       },
+        { nullptr, nullptr }
+    };
+
+    auto* buf = (BYTE*)pFirmwareTableBuffer;
+    for (UINT i = 0; i < result; ) {
+        bool replaced = false;
+        for (int k = 0; kFwReplace[k].find; ++k) {
+            size_t flen = strlen(kFwReplace[k].find);
+            if (i + flen > result) continue;
+            if (_strnicmp((char*)buf + i, kFwReplace[k].find, flen) == 0) {
+                memcpy(buf + i, kFwReplace[k].replace, flen);
+                i += (UINT)flen;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) ++i;
+    }
+    return result;
 }
 
 /* Fake mouse activity so reverse-turing checks pass.
@@ -580,35 +1005,30 @@ static NTSTATUS NTAPI Hook_NtQueryInformationProcess(
     return STATUS_SUCCESS;
 }
 
-/* MessageBox — auto-confirm dialogs so pafish dialog checks pass */
-static int AutoConfirmMessageBox(UINT uType)
-{
-    UINT type = uType & MB_TYPEMASK;
-    if (type == MB_YESNO || type == MB_YESNOCANCEL)
-        return IDYES;
-    if (type == MB_RETRYCANCEL)
-        return IDRETRY;
-    return IDOK;
-}
+/* Simulate mouse movement so consecutive GetCursorPos calls return different positions */
+static volatile LONG sCursorCallCount = 0;
 
-static int WINAPI Hook_MessageBoxA(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType)
+static BOOL WINAPI Hook_GetCursorPos(LPPOINT lpPoint)
 {
-    (void)hWnd;
-    SubmitRuntimeEvent(AvmEventNativeApiCall, AvmActionSpoof,
-        L"MessageBoxA", L"dialog", L"auto-confirmed", 0, 0);
-    if (gOrig_MessageBoxA)
-        gOrig_MessageBoxA(hWnd, lpText, lpCaption, uType | MB_DEFBUTTON1);
-    return AutoConfirmMessageBox(uType);
-}
+    BOOL result = FALSE;
+    LONG n;
 
-static int WINAPI Hook_MessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
-{
-    (void)hWnd;
-    SubmitRuntimeEvent(AvmEventNativeApiCall, AvmActionSpoof,
-        L"MessageBoxW", L"dialog", L"auto-confirmed", 0, 0);
-    if (gOrig_MessageBoxW)
-        gOrig_MessageBoxW(hWnd, lpText, lpCaption, uType | MB_DEFBUTTON1);
-    return AutoConfirmMessageBox(uType);
+    if (!lpPoint) return FALSE;
+
+    if (gOrig_GetCursorPos)
+        result = gOrig_GetCursorPos(lpPoint);
+    else {
+        lpPoint->x = 400;
+        lpPoint->y = 300;
+        result = TRUE;
+    }
+
+    n = InterlockedIncrement(&sCursorCallCount);
+    /* Add a small progressive offset so movement checks see changing positions */
+    lpPoint->x += (LONG)((n * 7) % 120);
+    lpPoint->y += (LONG)((n * 5) % 90);
+
+    return result;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -631,15 +1051,24 @@ static const AvmFuncRedirect kRedirects[] = {
     { "RegQueryValueExW",               (PVOID)Hook_RegQueryValueExW },
     { "CreateFileA",                    (PVOID)Hook_CreateFileA },
     { "CreateFileW",                    (PVOID)Hook_CreateFileW },
+    { "OpenServiceA",                   (PVOID)Hook_OpenServiceA },
+    { "OpenServiceW",                   (PVOID)Hook_OpenServiceW },
     { "GetFileAttributesA",             (PVOID)Hook_GetFileAttributesA },
     { "GetFileAttributesW",             (PVOID)Hook_GetFileAttributesW },
+    { "FindFirstFileA",                 (PVOID)Hook_FindFirstFileA },
+    { "FindFirstFileW",                 (PVOID)Hook_FindFirstFileW },
+    { "FindNextFileA",                  (PVOID)Hook_FindNextFileA },
+    { "FindNextFileW",                  (PVOID)Hook_FindNextFileW },
+    { "FindClose",                      (PVOID)Hook_FindClose },
+    { "EnumServicesStatusExA",          (PVOID)Hook_EnumServicesStatusExA },
+    { "EnumServicesStatusExW",          (PVOID)Hook_EnumServicesStatusExW },
+    { "GetSystemFirmwareTable",         (PVOID)Hook_GetSystemFirmwareTable },
     { "GetAsyncKeyState",               (PVOID)Hook_GetAsyncKeyState },
+    { "GetCursorPos",                   (PVOID)Hook_GetCursorPos },
     { "GetTickCount",                   (PVOID)Hook_GetTickCount },
     { "GetTickCount64",                 (PVOID)Hook_GetTickCount64 },
     { "QueryPerformanceCounter",        (PVOID)Hook_QueryPerformanceCounter },
     { "NtQueryInformationProcess",      (PVOID)Hook_NtQueryInformationProcess },
-    { "MessageBoxA",                    (PVOID)Hook_MessageBoxA },
-    { "MessageBoxW",                    (PVOID)Hook_MessageBoxW },
     { nullptr, nullptr }
 };
 
@@ -660,9 +1089,68 @@ static FARPROC WINAPI Hook_GetProcAddress(HMODULE hModule, LPCSTR lpProcName)
     return result;
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════
+ * WriteConsole hooks — redirect to WriteFile so pipe capture works
+ * When stdout/stderr is a pipe (e.g. launched via controller "Launch with Shim"),
+ * WriteConsoleA/W fails on the pipe handle.  These hooks fall back to
+ * WriteFile so all console output is captured.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static BOOL WINAPI Hook_WriteConsoleA(
+    HANDLE       hConsoleOutput,
+    const VOID*  lpBuffer,
+    DWORD        nCharsToWrite,
+    LPDWORD      lpCharsWritten,
+    LPVOID       lpReserved)
+{
+    /* Try the real WriteConsoleA first (works when attached to an actual console) */
+    if (gOrig_WriteConsoleA &&
+        gOrig_WriteConsoleA(hConsoleOutput, lpBuffer, nCharsToWrite, lpCharsWritten, lpReserved))
+        return TRUE;
+
+    /* Fall back: pipe / file handle — write raw bytes */
+    DWORD written = 0;
+    BOOL  ok = WriteFile(hConsoleOutput, lpBuffer, nCharsToWrite, &written, nullptr);
+    if (lpCharsWritten) *lpCharsWritten = written;
+    return ok;
+}
+
+static BOOL WINAPI Hook_WriteConsoleW(
+    HANDLE       hConsoleOutput,
+    const VOID*  lpBuffer,
+    DWORD        nCharsToWrite,
+    LPDWORD      lpCharsWritten,
+    LPVOID       lpReserved)
+{
+    /* Try the real WriteConsoleW first */
+    if (gOrig_WriteConsoleW &&
+        gOrig_WriteConsoleW(hConsoleOutput, lpBuffer, nCharsToWrite, lpCharsWritten, lpReserved))
+        return TRUE;
+
+    /* Fall back: convert UTF-16 → UTF-8 and write to the pipe */
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)lpBuffer, (int)nCharsToWrite,
+                                    nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return FALSE;
+
+    char* buf = (char*)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)bytes);
+    if (!buf) return FALSE;
+
+    WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)lpBuffer, (int)nCharsToWrite,
+                        buf, bytes, nullptr, nullptr);
+
+    DWORD written = 0;
+    BOOL  ok = WriteFile(hConsoleOutput, buf, (DWORD)bytes, &written, nullptr);
+    HeapFree(GetProcessHeap(), 0, buf);
+
+    if (lpCharsWritten) *lpCharsWritten = (ok ? nCharsToWrite : 0);
+    return ok;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * IAT patching infrastructure
  * ═══════════════════════════════════════════════════════════════════ */
+
 
 /* Extract the basename of a DLL name (strip path, no extension comparison needed) */
 static const char* BaseName(const char* s)
@@ -706,9 +1194,9 @@ static void PatchIATEntry(
         auto* origThunk = (IMAGE_THUNK_DATA*)((BYTE*)hMod + imp->OriginalFirstThunk);
         auto* iatThunk  = (IMAGE_THUNK_DATA*)((BYTE*)hMod + imp->FirstThunk);
 
-        /* Some modules have a null OriginalFirstThunk; fall back to FirstThunk */
-        if (!imp->OriginalFirstThunk)
-            origThunk = iatThunk;
+        /* Skip bound import descriptors (OriginalFirstThunk == 0 means the
+         * FirstThunk holds resolved VAs, not RVAs into IMAGE_IMPORT_BY_NAME). */
+        if (!imp->OriginalFirstThunk) continue;
 
         for (; origThunk->u1.AddressOfData; ++origThunk, ++iatThunk) {
             if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal)) continue;
@@ -737,22 +1225,33 @@ static void PatchModule(HMODULE hMod)
     PatchIATEntry(hMod, nullptr, "CreateFileW",                 Hook_CreateFileW);
     PatchIATEntry(hMod, nullptr, "GetFileAttributesA",          Hook_GetFileAttributesA);
     PatchIATEntry(hMod, nullptr, "GetFileAttributesW",          Hook_GetFileAttributesW);
+    PatchIATEntry(hMod, nullptr, "FindFirstFileA",              Hook_FindFirstFileA);
+    PatchIATEntry(hMod, nullptr, "FindFirstFileW",              Hook_FindFirstFileW);
+    PatchIATEntry(hMod, nullptr, "FindNextFileA",               Hook_FindNextFileA);
+    PatchIATEntry(hMod, nullptr, "FindNextFileW",               Hook_FindNextFileW);
+    PatchIATEntry(hMod, nullptr, "FindClose",                   Hook_FindClose);
+    PatchIATEntry(hMod, nullptr, "EnumServicesStatusExA",       Hook_EnumServicesStatusExA);
+    PatchIATEntry(hMod, nullptr, "EnumServicesStatusExW",       Hook_EnumServicesStatusExW);
+    PatchIATEntry(hMod, nullptr, "GetSystemFirmwareTable",      Hook_GetSystemFirmwareTable);
     PatchIATEntry(hMod, nullptr, "GetAsyncKeyState",            Hook_GetAsyncKeyState);
+    PatchIATEntry(hMod, nullptr, "GetCursorPos",                Hook_GetCursorPos);
     PatchIATEntry(hMod, nullptr, "GetTickCount",                Hook_GetTickCount);
     PatchIATEntry(hMod, nullptr, "GetTickCount64",              Hook_GetTickCount64);
     PatchIATEntry(hMod, nullptr, "QueryPerformanceCounter",     Hook_QueryPerformanceCounter);
     PatchIATEntry(hMod, nullptr, "GetProcAddress",              Hook_GetProcAddress);
+    /* advapi32 service manager */
+    PatchIATEntry(hMod, nullptr, "OpenServiceA",                Hook_OpenServiceA);
+    PatchIATEntry(hMod, nullptr, "OpenServiceW",                Hook_OpenServiceW);
     /* advapi32 / kernelbase registry */
     PatchIATEntry(hMod, nullptr, "RegOpenKeyExA",               Hook_RegOpenKeyExA);
     PatchIATEntry(hMod, nullptr, "RegOpenKeyExW",               Hook_RegOpenKeyExW);
     PatchIATEntry(hMod, nullptr, "RegQueryValueExA",            Hook_RegQueryValueExA);
     PatchIATEntry(hMod, nullptr, "RegQueryValueExW",            Hook_RegQueryValueExW);
     /* ntdll */
+    PatchIATEntry(hMod, nullptr, "WriteConsoleA",               Hook_WriteConsoleA);
+    PatchIATEntry(hMod, nullptr, "WriteConsoleW",               Hook_WriteConsoleW);
     PatchIATEntry(hMod, nullptr, "NtQueryInformationProcess",   Hook_NtQueryInformationProcess);
-    /* user32 dialog hooks */
-    PatchIATEntry(hMod, nullptr, "MessageBoxA",                 Hook_MessageBoxA);
-    PatchIATEntry(hMod, nullptr, "MessageBoxW",                 Hook_MessageBoxW);
-    PatchIATEntry(hMod, nullptr, "NtQuerySystemInformation",    nullptr); /* covered by GetProcAddress hook */
+    /* NtQuerySystemInformation is intercepted via the GetProcAddress hook above; no IAT patch needed */
 }
 
 /* Enumerate all modules in the current process and patch each one */
@@ -798,6 +1297,8 @@ static void ResolveOriginals(void)
     RESOLVE(hKB,   "GetDiskFreeSpaceExA",           Fn_GetDiskFreeSpaceExA,        gOrig_GetDiskFreeSpaceExA);
     RESOLVE(hK32,  "GetDiskFreeSpaceExW",           Fn_GetDiskFreeSpaceExW,        gOrig_GetDiskFreeSpaceExW);
     RESOLVE(hKB,   "GetDiskFreeSpaceExW",           Fn_GetDiskFreeSpaceExW,        gOrig_GetDiskFreeSpaceExW);
+    RESOLVE(hAdv,  "OpenServiceA",                  Fn_OpenServiceA,               gOrig_OpenServiceA);
+    RESOLVE(hAdv,  "OpenServiceW",                  Fn_OpenServiceW,               gOrig_OpenServiceW);
     RESOLVE(hAdv,  "RegOpenKeyExA",                 Fn_RegOpenKeyExA,              gOrig_RegOpenKeyExA);
     RESOLVE(hKB,   "RegOpenKeyExA",                 Fn_RegOpenKeyExA,              gOrig_RegOpenKeyExA);
     RESOLVE(hAdv,  "RegOpenKeyExW",                 Fn_RegOpenKeyExW,              gOrig_RegOpenKeyExW);
@@ -815,6 +1316,7 @@ static void ResolveOriginals(void)
     RESOLVE(hK32,  "GetFileAttributesW",            Fn_GetFileAttributesW,         gOrig_GetFileAttributesW);
     RESOLVE(hKB,   "GetFileAttributesW",            Fn_GetFileAttributesW,         gOrig_GetFileAttributesW);
     RESOLVE(hU32,  "GetAsyncKeyState",              Fn_GetAsyncKeyState,           gOrig_GetAsyncKeyState);
+    RESOLVE(hU32,  "GetCursorPos",                  Fn_GetCursorPos,               gOrig_GetCursorPos);
     RESOLVE(hK32,  "GetTickCount",                  Fn_GetTickCount,               gOrig_GetTickCount);
     RESOLVE(hKB,   "GetTickCount",                  Fn_GetTickCount,               gOrig_GetTickCount);
     RESOLVE(hK32,  "GetTickCount64",                Fn_GetTickCount64,             gOrig_GetTickCount64);
@@ -823,38 +1325,28 @@ static void ResolveOriginals(void)
     RESOLVE(hKB,   "QueryPerformanceCounter",       Fn_QueryPerformanceCounter,    gOrig_QueryPerformanceCounter);
     RESOLVE(hK32,  "GetProcAddress",                Fn_GetProcAddress,             gOrig_GetProcAddress);
     RESOLVE(hKB,   "GetProcAddress",                Fn_GetProcAddress,             gOrig_GetProcAddress);
+    RESOLVE(hK32,  "FindFirstFileA",                Fn_FindFirstFileA,             gOrig_FindFirstFileA);
+    RESOLVE(hKB,   "FindFirstFileA",                Fn_FindFirstFileA,             gOrig_FindFirstFileA);
+    RESOLVE(hK32,  "FindFirstFileW",                Fn_FindFirstFileW,             gOrig_FindFirstFileW);
+    RESOLVE(hKB,   "FindFirstFileW",                Fn_FindFirstFileW,             gOrig_FindFirstFileW);
+    RESOLVE(hK32,  "FindNextFileA",                 Fn_FindNextFileA,              gOrig_FindNextFileA);
+    RESOLVE(hKB,   "FindNextFileA",                 Fn_FindNextFileA,              gOrig_FindNextFileA);
+    RESOLVE(hK32,  "FindNextFileW",                 Fn_FindNextFileW,              gOrig_FindNextFileW);
+    RESOLVE(hKB,   "FindNextFileW",                 Fn_FindNextFileW,              gOrig_FindNextFileW);
+    RESOLVE(hK32,  "FindClose",                     Fn_FindClose,                  gOrig_FindClose);
+    RESOLVE(hKB,   "FindClose",                     Fn_FindClose,                  gOrig_FindClose);
+    RESOLVE(hAdv,  "EnumServicesStatusExA",         Fn_EnumServicesStatusExA,      gOrig_EnumServicesStatusExA);
+    RESOLVE(hAdv,  "EnumServicesStatusExW",         Fn_EnumServicesStatusExW,      gOrig_EnumServicesStatusExW);
+    RESOLVE(hK32,  "GetSystemFirmwareTable",        Fn_GetSystemFirmwareTable,     gOrig_GetSystemFirmwareTable);
+    RESOLVE(hKB,   "GetSystemFirmwareTable",        Fn_GetSystemFirmwareTable,     gOrig_GetSystemFirmwareTable);
+    RESOLVE(hK32,  "WriteConsoleA",                 Fn_WriteConsoleA,              gOrig_WriteConsoleA);
+    RESOLVE(hKB,   "WriteConsoleA",                 Fn_WriteConsoleA,              gOrig_WriteConsoleA);
+    RESOLVE(hK32,  "WriteConsoleW",                 Fn_WriteConsoleW,              gOrig_WriteConsoleW);
+    RESOLVE(hKB,   "WriteConsoleW",                 Fn_WriteConsoleW,              gOrig_WriteConsoleW);
     RESOLVE(hNtdl, "NtQueryInformationProcess",     Fn_NtQueryInformationProcess,  gOrig_NtQueryInformationProcess);
     RESOLVE(hNtdl, "NtQuerySystemInformation",      Fn_NtQuerySystemInformation,   gOrig_NtQuerySystemInformation);
-    RESOLVE(hU32,  "MessageBoxA",                   Fn_MessageBoxA,                gOrig_MessageBoxA);
-    RESOLVE(hU32,  "MessageBoxW",                   Fn_MessageBoxW,                gOrig_MessageBoxW);
 
 #undef RESOLVE
-}
-
-/* ═══════════════════════════════════════════════════════════════════
- * Initialization
- * ═══════════════════════════════════════════════════════════════════ */
-
-static DWORD WINAPI InitializationThread(LPVOID)
-{
-    /* 1. Resolve originals from export tables (before any IAT patching) */
-    ResolveOriginals();
-
-    /* 2. Patch every loaded module's IAT */
-    PatchAllModules();
-
-    /* 3. Optionally read policy from kernel driver */
-    if (EnsureDriver()) {
-        AVM_POLICY policy = {};
-        DWORD bytesReturned = 0;
-        DeviceIoControl(gDriver, AVM_IOCTL_GET_POLICY,
-            nullptr, 0, &policy, sizeof(policy), &bytesReturned, nullptr);
-    }
-
-    SubmitRuntimeEvent(AvmEventPolicyUpdate, AvmActionLog,
-        L"AvmRuntimeShim", L"dll-loaded", L"hooks-applied", 0, 0);
-
-    return 0;
 }
 
 extern "C" __declspec(dllexport) void WINAPI AvmRuntimePing()
@@ -869,8 +1361,20 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved)
 
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(module);
-        HANDLE thread = CreateThread(nullptr, 0, InitializationThread, nullptr, 0, nullptr);
-        if (thread) CloseHandle(thread);
+        DisableStdIoBuffering();
+
+        /* Synchronously resolve originals and patch the main EXE's IAT BEFORE
+         * the background thread is created and BEFORE the injector calls
+         * ResumeThread.  Patching only the main EXE is sufficient — app code
+         * calls functions via its own IAT.  Patching system DLLs here is both
+         * unnecessary and dangerous (system DLLs can have bound-import
+         * descriptors whose FirstThunk entries are resolved VAs, not RVAs). */
+        ResolveOriginals();
+        PatchModule(GetModuleHandleW(nullptr)); /* main EXE only */
+
+        /* Keep the shim conservative for stability. Patching the main EXE's
+         * imports covers the probe and pafish startup paths without racing a
+         * broad background sweep across already-loaded modules. */
     } else if (reason == DLL_PROCESS_DETACH) {
         SubmitRuntimeEvent(AvmEventProcessExit, AvmActionLog,
             L"AvmRuntimeShim", L"dll-unloaded", L"detach", 0, 0);

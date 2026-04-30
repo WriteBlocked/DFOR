@@ -1,0 +1,43 @@
+# Visual Studio workspace files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build intermediates
+**/obj/
+**/*.tlog
+**/*.lastbuildstate
+**/*.iobj
+**/*.ipdb
+**/*.ilk
+**/*.pch
+**/*.pdb
+**/*.idb
+**/*.exp
+**/*.lib
+**/*.tmp
+**/*.log
+
+# Generated WPF artifacts
+**/*.g.cs
+**/*.g.i.cs
+**/*.g.resources
+
+# Package/app noise
+*.aps
+*.cache
+*.bak
+*.orig
+Thumbs.db
+Desktop.ini
+
+# Keep compiled deliverables and docs
+!dist/
+!dist/**
+!x64/
+!x64/**
+!**/bin/
+!**/bin/Release/
+!**/bin/Release/**

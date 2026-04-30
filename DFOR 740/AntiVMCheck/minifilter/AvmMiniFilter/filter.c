@@ -17,6 +17,8 @@ static PCWSTR gDefaultHidePaths[] = {
     L"C:\\Windows\\System32\\drivers\\vmrawdsk.sys",
     L"C:\\Windows\\System32\\drivers\\vmusbmouse.sys",
     L"C:\\Windows\\System32\\drivers\\vmxnet3.sys",
+    L"C:\\Windows\\System32\\drivers\\vmmemctl.sys",
+    L"C:\\Windows\\System32\\drivers\\vmx86.sys",
     /* VMware Tools */
     L"C:\\Program Files\\VMware\\VMware Tools\\vmtoolsd.exe",
     L"C:\\Program Files\\VMware\\VMware Tools\\VMwareToolboxCmd.exe",
@@ -99,6 +101,12 @@ AvmPreCreate(
 
 static FLT_PREOP_CALLBACK_STATUS
 AvmPreNetworkQueryOpen(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID* CompletionContext);
+
+static FLT_PREOP_CALLBACK_STATUS
+AvmPreQueryInformation(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Flt_CompletionContext_Outptr_ PVOID* CompletionContext);
@@ -508,7 +516,14 @@ AvmPostDirControl(
     if (!AvmIsTargeted())
         return FLT_POSTOP_FINISHED_PROCESSING;
 
-    buffer = Data->Iopb->Parameters.DirectoryControl.QueryDirectory.DirectoryBuffer;
+    {
+        PMDL mdl = Data->Iopb->Parameters.DirectoryControl.QueryDirectory.MdlAddress;
+        if (mdl != NULL) {
+            buffer = MmGetSystemAddressForMdlSafe(mdl, NormalPagePriority | MdlMappingNoExecute);
+        } else {
+            buffer = Data->Iopb->Parameters.DirectoryControl.QueryDirectory.DirectoryBuffer;
+        }
+    }
     if (!buffer)
         return FLT_POSTOP_FINISHED_PROCESSING;
 
@@ -651,15 +666,37 @@ AvmPreNetworkQueryOpen(
         &nameInfo);
 
     if (!NT_SUCCESS(status)) {
-        /* Cannot resolve the name in the fast path; force the request
-         * through the regular IRP_MJ_CREATE path instead so our
-         * AvmPreCreate callback can inspect it. */
+        /* Name lookup failed (common on the fast-I/O path).
+         * Fall back to the raw volume-relative path from the file object,
+         * which is sufficient to match suffix rules like \Windows\System32\... */
+        if (Data->Iopb->TargetFileObject != NULL) {
+            UNICODE_STRING *rawName = &Data->Iopb->TargetFileObject->FileName;
+            ExAcquireFastMutex(&gState.Guard);
+            shouldHide = AvmShouldHidePath_Locked(rawName);
+            ExReleaseFastMutex(&gState.Guard);
+            if (shouldHide) {
+                Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+                Data->IoStatus.Information = 0;
+                return FLT_PREOP_COMPLETE;
+            }
+        }
         return FLT_PREOP_DISALLOW_FASTIO;
     }
 
     status = FltParseFileNameInformation(nameInfo);
     if (!NT_SUCCESS(status)) {
         FltReleaseFileNameInformation(nameInfo);
+        if (Data->Iopb->TargetFileObject != NULL) {
+            UNICODE_STRING *rawName = &Data->Iopb->TargetFileObject->FileName;
+            ExAcquireFastMutex(&gState.Guard);
+            shouldHide = AvmShouldHidePath_Locked(rawName);
+            ExReleaseFastMutex(&gState.Guard);
+            if (shouldHide) {
+                Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+                Data->IoStatus.Information = 0;
+                return FLT_PREOP_COMPLETE;
+            }
+        }
         return FLT_PREOP_DISALLOW_FASTIO;
     }
 
@@ -675,6 +712,83 @@ AvmPreNetworkQueryOpen(
 
         AvmFilterAppendEvent(AvmEventFileProbe, AvmActionHide,
             L"PreNetworkQueryOpen", truncName, L"hidden");
+
+        FltReleaseFileNameInformation(nameInfo);
+        Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+        Data->IoStatus.Information = 0;
+        return FLT_PREOP_COMPLETE;
+    }
+
+    FltReleaseFileNameInformation(nameInfo);
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+/* ----------------------------------------------------------------
+ * PreQueryInformation - intercept attribute/query-info paths used by
+ * NtQueryAttributesFile / GetFileAttributes on some local files.
+ * ---------------------------------------------------------------- */
+static FLT_PREOP_CALLBACK_STATUS
+AvmPreQueryInformation(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID* CompletionContext)
+{
+    PFLT_FILE_NAME_INFORMATION nameInfo = NULL;
+    NTSTATUS status;
+    ULONG enabledChecks;
+    BOOLEAN shouldHide = FALSE;
+    WCHAR truncName[AVM_MAX_TEXT_CHARS];
+    USHORT copyLen;
+
+    UNREFERENCED_PARAMETER(FltObjects);
+    *CompletionContext = NULL;
+
+    ExAcquireFastMutex(&gState.Guard);
+    enabledChecks = gState.Policy.EnabledChecks;
+    ExReleaseFastMutex(&gState.Guard);
+
+    if (!(enabledChecks & AvmCheckFileArtifacts))
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    if (!AvmIsTargeted())
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+
+    status = FltGetFileNameInformation(Data,
+        FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT,
+        &nameInfo);
+    if (!NT_SUCCESS(status)) {
+        if (Data->Iopb->TargetFileObject != NULL) {
+            UNICODE_STRING *rawName = &Data->Iopb->TargetFileObject->FileName;
+            ExAcquireFastMutex(&gState.Guard);
+            shouldHide = AvmShouldHidePath_Locked(rawName);
+            ExReleaseFastMutex(&gState.Guard);
+            if (shouldHide) {
+                Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+                Data->IoStatus.Information = 0;
+                return FLT_PREOP_COMPLETE;
+            }
+        }
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    status = FltParseFileNameInformation(nameInfo);
+    if (!NT_SUCCESS(status)) {
+        FltReleaseFileNameInformation(nameInfo);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    ExAcquireFastMutex(&gState.Guard);
+    shouldHide = AvmShouldHidePath_Locked(&nameInfo->Name);
+    ExReleaseFastMutex(&gState.Guard);
+
+    if (shouldHide) {
+        RtlZeroMemory(truncName, sizeof(truncName));
+        copyLen = nameInfo->Name.Length / sizeof(WCHAR);
+        if (copyLen >= AVM_MAX_TEXT_CHARS) copyLen = AVM_MAX_TEXT_CHARS - 1;
+        RtlCopyMemory(truncName, nameInfo->Name.Buffer, copyLen * sizeof(WCHAR));
+
+        AvmFilterAppendEvent(AvmEventFileProbe, AvmActionHide,
+            L"PreQueryInformation", truncName, L"hidden");
 
         FltReleaseFileNameInformation(nameInfo);
         Data->IoStatus.Status = STATUS_OBJECT_NAME_NOT_FOUND;
@@ -802,6 +916,7 @@ AvmMessageNotify(
 CONST FLT_OPERATION_REGISTRATION gCallbacks[] = {
     { IRP_MJ_CREATE,             0, AvmPreCreate,           NULL              },
     { IRP_MJ_NETWORK_QUERY_OPEN, 0, AvmPreNetworkQueryOpen, NULL              },
+    { IRP_MJ_QUERY_INFORMATION,  0, AvmPreQueryInformation, NULL              },
     { IRP_MJ_DIRECTORY_CONTROL,  0, AvmPreDirControl,       AvmPostDirControl },
     { IRP_MJ_OPERATION_END }
 };

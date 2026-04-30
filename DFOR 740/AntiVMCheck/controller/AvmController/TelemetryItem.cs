@@ -6,6 +6,7 @@ namespace AvmController
     {
         public DateTime Timestamp { get; set; }
         public string Source { get; set; }
+        public string QueryCategory { get; set; }
         public string EventType { get; set; }
         public uint ProcessId { get; set; }
         public uint ThreadId { get; set; }

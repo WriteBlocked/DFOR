@@ -4,6 +4,13 @@
 #include <ntstrsafe.h>
 #include "..\..\shared\avm_shared.h"
 
+/* SeLocateProcessImageName is not declared in the public WDK headers */
+NTSTATUS
+SeLocateProcessImageName(
+    _In_  PEPROCESS          Process,
+    _Out_ PUNICODE_STRING *   pImageFileName
+    );
+
 typedef struct _AVM_KERNEL_STATE {
     FAST_MUTEX Guard;
     PDEVICE_OBJECT DeviceObject;

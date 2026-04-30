@@ -1,0 +1,46 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=Sample
+ClassGuid={78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider=%ManufacturerName%
+CatalogFile=AvmKernel.cat
+DriverVer=04/16/2026,1.0.0.0
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,
+
+[SourceDisksFiles]
+AvmKernel.sys = 1
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$
+
+[Standard.NT$ARCH$]
+%AvmKernel.DeviceDesc%=AvmKernel_Install, Root\AvmKernel
+
+[AvmKernel_Install]
+CopyFiles = DriverCopyFiles
+
+[DriverCopyFiles]
+AvmKernel.sys
+
+[AvmKernel_Install.Services]
+AddService = AvmKernel,%SPSVCINST_ASSOCSERVICE%,AvmKernel_Service_Inst
+
+[AvmKernel_Service_Inst]
+DisplayName    = %AvmKernel.SvcDesc%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %12%\AvmKernel.sys
+
+[Strings]
+SPSVCINST_ASSOCSERVICE=0x00000002
+ManufacturerName="AntiVM"
+DiskName="AvmKernel Installation Disk"
+AvmKernel.DeviceDesc="Anti-VM Awareness KMDF Driver"
+AvmKernel.SvcDesc="Anti-VM Awareness KMDF Driver"

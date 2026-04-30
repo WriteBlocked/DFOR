@@ -1,392 +1,161 @@
 # Anti-VM-Awareness Countermeasure Platform
 
-This repository contains a broad MVP for defensive sandbox research. It combines:
+This project is a Windows lab tool for hiding common virtual machine artifacts from a target process. The goal is to make malware analysis inside a VM more realistic by reducing the obvious signs that the guest is virtualized.
 
-1. **AvmKernel**: a KMDF control driver that tracks target processes, stores policy, emits kernel telemetry, and applies safe callback-based concealment.
-2. **AvmMiniFilter**: a file-system minifilter that hides or redirects VM and sandbox artifacts and filters directory enumeration results.
-3. **AvmRuntimeShim**: an injected helper DLL that hooks selected Win32 and native APIs inside target processes for debugger concealment, timing normalization, process/tool hiding, and registry/file filtering.
-4. **AvmController**: a WPF GUI that manages policy, targets, driver status, telemetry, shim injection, and log export.
+It is built as a school project for defensive malware analysis. It is not a production security product.
 
-## Architecture
+## What Is Included
 
-### KMDF driver
+| Component | Purpose |
+|---|---|
+| `AvmKernel.sys` | Stores policy, blocks registry artifacts, and collects telemetry |
+| `AvmMiniFilter.sys` | Hides VM-related files and directory entries |
+| `AvmRuntimeShim.dll` | Hooks selected Windows APIs inside a launched target process |
+| `AvmController.exe` | GUI used to apply policy, launch targets with the shim, and view telemetry |
+| `AvmProbeTest.exe` | Simple validation program for checking what is still detectable |
+| `build.ps1`  | A build script that signs the drivers, spoofs user activity, builds the binaries, and spoofs hardware information. |
 
-- Non-PnP control device exposed as `\\.\AvmKernel`
-- IOCTLs for:
-  - policy upload
-  - target registration
-  - file-rule registration
-  - status retrieval
-  - batched telemetry fetch
-  - runtime-shim event ingestion
-- Coverage:
-  - target process tracking
-  - process create/exit logging
-  - suspicious module load logging
-  - handle-open monitoring for analysis-tool probing
-  - registry artifact open/create blocking
-  - shared observe/selective/full modes
+## How It Works
 
-### Minifilter
+The project hides VM artifacts in three layers:
 
-- Filter Manager communication port: `\AvmMiniFilterPort`
-- Coverage:
-  - pre-create path checks
-  - hide-on-open by returning `STATUS_OBJECT_NAME_NOT_FOUND`
-  - redirect-on-open by replacing the file object name
-  - directory listing filtering in post-directory-control
-  - batched telemetry for file probes and directory scrubbing
+1. The kernel driver blocks or spoofs selected registry results.
+2. The minifilter hides selected files and folders.
+3. The runtime shim hooks API calls inside a target process when you launch that process through the controller.
 
-### Runtime shim
+That means some concealment is system-wide, but some concealment only happens inside a process that was launched with the shim.
 
-- Injected into target processes by the controller
-- Uses IAT patching and `GetProcAddress` interception to cover:
-  - `IsDebuggerPresent`
-  - `CheckRemoteDebuggerPresent`
-  - `NtQueryInformationProcess` (ProcessDebugPort, ProcessDebugObjectHandle, ProcessDebugFlags)
-  - `GetDiskFreeSpaceExA` / `GetDiskFreeSpaceExW` (fake 500 GB disk)
-  - `GetTickCount` / `GetTickCount64` (add 4-hour uptime offset)
-  - `QueryPerformanceCounter`
-  - `RegOpenKeyExA` / `RegOpenKeyExW` (block VMware/VirtualBox registry keys)
-  - `RegQueryValueExA` / `RegQueryValueExW`
-  - `CreateFileA` / `CreateFileW` (block VM pseudo-devices and driver paths)
-  - `GetFileAttributesA` / `GetFileAttributesW` (hide VM driver files)
-  - `GetAsyncKeyState` (simulate mouse-click activity for reverse-turing checks)
-  - `GetProcAddress` (redirect dynamic API resolution to shim hooks)
+If you want the in-depth explanation, see [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
 
-### GUI controller
+## Requirements
 
-- Driver status view
-- Target registration by PID, image name, or path prefix
-- Per-check enable/disable toggles
-- Observe / selective concealment / full concealment modes
-- File rule editor for hide and redirect rules
-- Telemetry viewer
-- JSON/CSV export
-- Runtime shim injection into existing target processes
+- Windows x64 guest VM (I used VMware Workstation)
+- Administrator PowerShell
+- Test signing enabled
+- Secure Boot disabled
+- Memory Integrity / HVCI disabled
+
+Build machine requirements:
+
+- Visual Studio 2022
+- Windows Driver Kit (I am not sure if this is required.)
+- .NET Framework 4.8 developer pack
+
+## Quick Start
+
+### Build on the host
+
+```powershell
+.\build.ps1
+```
+
+This builds the project, signs the drivers, and copies the needed files into `dist\`.
+
+### Install on the VM
+
+Copy the files from `dist\` to the VM, open an elevated PowerShell window, and run:
+
+```powershell
+.\build.ps1 -Install
+```
+
+`-Install` reinstalls both drivers every time you run it. The script stops and deletes the old services, copies the new `.sys` files into `C:\Windows\System32\drivers\`, recreates the services, and starts them again.
+
+Before installing, make sure test signing is enabled:
+
+```powershell
+bcdedit /set testsigning on
+```
+
+Reboot after changing that setting.
+
+## Basic Usage
+
+1. Run `AvmController.exe` as Administrator.
+2. Click `Refresh` and make sure both drivers show as connected.
+3. Leave the mode set to `Full Concealment`.
+4. Click `Apply Policy`.
+5. Use `Launch with Shim` to start `AvmProbeTest.exe` or another test program/malware.
+6. Review the output and the telemetry panel.
+7. Perform dynamic analysis.
+
+Important: if you run a test program directly from `cmd.exe` instead of launching it through the controller, the runtime shim is not active for that process.
+
+See [CONTROLLER_GUIDE.md](CONTROLLER_GUIDE.md) for the UI flow.
+
+## What The Telemetry Means
+
+The telemetry view shows which requests were intercepted and what the project returned instead.
+
+The current UI shows:
+
+- `Time`
+- `Source`
+- `Category`
+- `PID`
+- `Original`
+- `Spoofed`
+- `Process`
+
+You can also filter, sort, and clear the telemetry list from the controller.
+
+Below is an example image of the UI.
+![UI Example](1.png "An example of the UI.")
+
+## Validation
+
+### AvmProbeTest
+
+Run it through `Launch with Shim` for the most useful result.
+
+Expected pattern:
+
+- Direct run: shows the real VM state
+- Non-Shimmed run: shows some VM artifacts
+- Shimmed run: shows what the target process can still detect after concealment
+
+## Limitations
+
+This project has important limits:
+
+- It has only been tested in VMware. VMware is the main target environment for this project.
+- VirtualBox artifact coverage exists in parts of the code and probe, but it has not been fully validated in a real VirtualBox test environment.
+- Some concealment is process-scoped. The runtime shim only affects processes launched with the shim or injected manually.
+- Direct runs of tools do not get user-mode API concealment.
+- Direct syscalls and kernel-level malware can bypass user-mode hooks.
+- Hardware or hypervisor-level signals are outside the scope of this project, although some documentation has been provided.
+- Some checks are difficult or impossible to hide cleanly from inside the guest, including some timing-based checks and low-level hypervisor signals.
+- The drivers are test-signed and intended for lab use only.
+
+## Important Note
+
+Some checks can only be fixed outside of the hypervisor. For my hypervisor, VMware, I set the following options in my VM's `.vmx` file:
+
+- cpuid.1.ecx = "----:----:----:----:----:----:--0-:----"
+- hypervisor.cpuid.v0 = FALSE
+- ethernet0.address = "FC:4C:EA:2C:39:B4"
+
+The MAC address can be set to any hex characters, preferably with a real vendor's assigned prefixes. I chose Dell because the `build.ps1` file also sets some information to look like a Dell computer. For more information, consult [this site](https://maclookup.app/vendors/dell-inc).
 
 ## Repository Layout
 
 | Path | Purpose |
-| --- | --- |
-| `shared\avm_shared.h` | Shared kernel/user contracts |
-| `kernel\AvmKernel` | KMDF driver source and INF |
-| `minifilter\AvmMiniFilter` | Minifilter source and INF |
-| `runtime\AvmRuntimeShim` | Injected helper DLL |
-| `controller\AvmController` | WPF GUI controller |
-| `probe\AvmProbeTest` | VM indicator validation probe |
-| `AntiVmCountermeasure.sln` | Visual Studio solution |
-| `build.ps1` | Build entry point |
+|---|---|
+| `shared\avm_shared.h` | Shared structures and constants |
+| `kernel\AvmKernel\` | Kernel driver |
+| `minifilter\AvmMiniFilter\` | File system minifilter |
+| `runtime\AvmRuntimeShim\` | Runtime shim DLL |
+| `controller\AvmController\` | WPF controller |
+| `probe\AvmProbeTest\` | Validation probe |
+| `build.ps1` | Build, sign, package, and install script |
 
-## Build Steps
+## Related Docs
 
-### Requirements
+- [HOW_IT_WORKS.md](HOW_IT_WORKS.md)
+- [CONTROLLER_GUIDE.md](CONTROLLER_GUIDE.md)
 
-**To build** (on the development machine):
-- Visual Studio 2022 or Build Tools with C++ desktop tools
-- Windows Driver Kit (WDK) for KMDF + minifilter builds
-- .NET Framework 4.8 developer pack
-- Administrator PowerShell
+## AI Disclosure
 
-**To install only** (on the target VM — no VS or WDK needed):
-- The pre-built files copied to a folder (see Deploy to VM below)
-- Administrator PowerShell
-- Test signing enabled (`bcdedit /set testsigning on` + reboot)
-- Secure Boot disabled, Memory Integrity / HVCI disabled
+AI was used for parts of this project. AI was first used to brainstorm and create a project spec, followed by an implementation plan and specific prompting information. 
 
-### Quick Start
-
-```powershell
-# --- On the BUILD machine (has VS + WDK) ---
-
-# Build and sign
-.\build.ps1
-
-# Build, sign, AND install locally
-.\build.ps1 -Install
-
-# --- On the TARGET VM (no VS/WDK needed) ---
-
-# Install pre-built drivers (auto-detects no build tools, skips build)
-.\build.ps1 -Install
-```
-
-### Deploy to VM
-
-After building on the dev machine, copy these files to a single folder on the VM:
-
-| File | Source Path |
-| --- | --- |
-| `AvmKernel.sys` | `x64\Release\` |
-| `AvmMiniFilter.sys` | `x64\Release\` |
-| `HillerTestDriver.cer` | project root |
-| `AvmController.exe` | `controller\AvmController\bin\Release\` |
-| `AvmProbeTest.exe` | `x64\Release\` |
-| `build.ps1` | project root |
-
-Then on the VM, open an **Administrator PowerShell** in that folder and run:
-
-```powershell
-.\build.ps1 -Install
-```
-
-The script auto-detects that Visual Studio is not installed and skips
-the build/sign steps, using the pre-signed files directly.
-
-### What build.ps1 Does
-
-**Build mode** (VS + WDK present):
-1. Finds MSBuild and verifies WDK is available
-2. Builds all 5 projects
-3. Creates/reuses a self-signed code-signing certificate
-4. Signs both `.sys` driver files
-5. With `-Install`: also imports cert, creates services, sets registry keys, starts drivers
-
-**Install-only mode** (no VS/WDK — target VM):
-1. Verifies `.sys` files and `.cer` exist in the script directory
-2. Checks test signing is enabled
-3. Imports the certificate into Root and TrustedPublisher stores
-4. Creates and starts the kernel driver service
-5. Creates minifilter service with correct Filter Manager registry keys
-6. Launches the controller GUI
-
-### Manual Build
-
-Or open `AntiVmCountermeasure.sln` in Visual Studio and build **Release | x64**.
-
-## Documentation
-
-| Document | Description |
-| --- | --- |
-| [HOW_IT_WORKS.md](HOW_IT_WORKS.md) | Complete architecture explanation (high and low level), demo instructions |
-| [CONTROLLER_GUIDE.md](CONTROLLER_GUIDE.md) | How to use the controller GUI |
-| [PROJECT_SPEC.md](PROJECT_SPEC.md) | Original project specification |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Implementation plan and phases |
-
-## Driver Loading
-
-Build output provides:
-
-- `AvmKernel.sys`
-- `AvmMiniFilter.sys`
-- `AvmRuntimeShim.dll`
-- `AvmController.exe`
-- `AvmProbeTest.exe`
-
-### Automated (Recommended)
-
-```powershell
-# On the target VM with VS + WDK installed:
-.\build.ps1 -Install
-```
-
-### Manual Setup
-
-If you built on a different machine and copied files to the VM:
-
-```powershell
-# 1. Enable test signing (reboot required)
-bcdedit /set testsigning on
-
-# 2. Import the certificate
-Import-Certificate -FilePath .\HillerTestDriver.cer -CertStoreLocation Cert:\LocalMachine\Root
-Import-Certificate -FilePath .\HillerTestDriver.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
-
-# 3. Install kernel driver
-Copy-Item .\AvmKernel.sys C:\Windows\System32\drivers\ -Force
-sc.exe create AvmKernel type= kernel start= demand binPath= system32\drivers\AvmKernel.sys
-sc.exe start AvmKernel
-
-# 4. Install minifilter
-Copy-Item .\AvmMiniFilter.sys C:\Windows\System32\drivers\ -Force
-sc.exe create AvmMiniFilter type= filesys start= demand binPath= system32\drivers\AvmMiniFilter.sys group= "FSFilter Activity Monitor" depend= FltMgr
-
-# 5. Set minifilter instance registry keys
-# For Windows 10/11 pre-24H2:
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\AvmMiniFilter\Instances" /v DefaultInstance /t REG_SZ /d "AvmMiniFilter Instance" /f
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\AvmMiniFilter\Instances\AvmMiniFilter Instance" /v Altitude /t REG_SZ /d "328766" /f
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\AvmMiniFilter\Instances\AvmMiniFilter Instance" /v Flags /t REG_DWORD /d 0 /f
-
-# For Windows 11 24H2+, use Parameters\Instances instead of Instances
-
-# 6. Start minifilter
-sc.exe start AvmMiniFilter
-fltmc filters  # verify AvmMiniFilter appears
-
-# 7. Launch controller
-.\AvmController.exe
-```
-
-## Usage
-
-1. Start the controller.
-2. Add one or more targets by PID, image name, or path prefix.
-3. Select the operating mode.
-4. Toggle countermeasure categories individually.
-5. Add hide or redirect file rules for VM or sandbox artifacts.
-6. Apply policy.
-7. Inject the runtime shim into the target process.
-8. Watch telemetry from the kernel driver, minifilter, and runtime shim in the grid.
-9. Export logs to JSON or CSV.
-
-## Example Scenarios
-
-### Debugger concealment
-
-- Enable **Debugger concealment**
-- Inject the runtime shim into the target
-- Calls to `IsDebuggerPresent`, `CheckRemoteDebuggerPresent`, and `NtQueryInformationProcess` are logged and spoofed in concealment modes
-
-### File artifact hiding
-
-- Add a hide rule for a suspicious path such as a VirtualBox or VMware artifact
-- Apply policy
-- The minifilter returns not found on create/open and logs the event
-
-### Directory filtering
-
-- Enable **Directory listing filtering**
-- Add hide rules that identify suspicious artifact names
-- Directory enumeration results have matching entries removed
-
-### Process/tool hiding
-
-- Enable **Process/tool concealment**
-- The runtime shim filters `NtQuerySystemInformation(SystemProcessInformation)`
-- The KMDF driver logs and can reduce handle access when a target probes hidden analysis tools
-
-## Limitations
-
-- The MVP avoids kernel patching and SSDT hooks by design; direct-syscall and kernel-resident malware are out of scope.
-- The runtime shim relies on IAT and `GetProcAddress` interception, so pre-resolved function pointers and custom syscall stubs are not fully covered.
-- The minifilter directory scrubber currently focuses on common directory information classes.
-- Current validation against Pafish still shows the guest MAC-address/OUI check as visible under VMware. This platform does not change the virtual NIC MAC address from inside the guest; that value must be changed in the hypervisor configuration.
-- To change the MAC address in **VMware Workstation/Player**, power off the VM, open **VM Settings -> Network Adapter -> Advanced**, then enter a new MAC address or generate one. VMware also documents a `.vmx`-file method for manual assignment when needed.
-- To change the MAC address in **VirtualBox**, power off the VM, open **Settings -> Network -> Advanced**, then edit the **MAC Address** field or generate a new one. The equivalent CLI form is `VBoxManage modifyvm "<VM Name>" --macaddress1 XXXXXXXXXXXX`.
-- Driver signing, INF packaging, and deployment are left in developer/test mode rather than production hardening.
-- The local environment used to generate this source tree did not expose MSBuild, the .NET SDK, or the WDK on PATH, so the included solution and build script are ready for a proper Windows driver toolchain but could not be built in-place here.
-
-## Hypervisor-Level Configuration
-
-Several VM detection techniques rely on CPU instructions or hardware-level signals that **cannot be intercepted or patched from inside the guest OS**. These require changes to the hypervisor configuration before booting the VM.
-
-### Pafish items that require hypervisor changes
-
-| Pafish check | Root cause | Fix |
-|---|---|---|
-| `rdtsc forcing VM exit` | RDTSC causes a VM exit; the exit latency is measurable | Use nested virtualisation or VMware's `monitor_control.virtual_rdtsc = TRUE`; full masking is not possible on all hardware |
-| `Hypervisor bit in CPUID` | CPUID leaf 1 ECX bit 31 is set by the hypervisor | See VMware section below |
-| `CPUID hypervisor vendor` | CPUID leaf 0x40000000 returns "VMwareVMware" | See VMware section below |
-| `VMware serial number` | VMware backdoor I/O port (0x5658 magic "VMXh") | See VMware section below |
-| `MAC address OUI` | Virtual NIC OUI is 00:0C:29 / 00:50:56 / 00:05:69 | See MAC address bullets above |
-
-### Hiding the hypervisor in VMware
-
-Add the following lines to the VM's `.vmx` file (power off first):
-
-```ini
-# Hide the hypervisor presence bit (CPUID leaf 1 ECX bit 31)
-cpuid.1.ecx = "----:----:----:----:----:----:--0-:----"
-
-# Remove the hypervisor vendor string (leaf 0x40000000)
-hypervisor.cpuid.v0 = FALSE
-
-# Disable the VMware backdoor I/O port (removes VMware serial-number check)
-monitor_control.disable_directexec = FALSE
-isolation.tools.getPtrLocation.disable = TRUE
-isolation.tools.setPtrLocation.disable = TRUE
-isolation.tools.setVersion.disable = TRUE
-isolation.tools.getVersion.disable = TRUE
-monitor_control.disable_chksimd = TRUE
-monitor_control.disable_ntreloc = TRUE
-monitor_control.disable_selfmod = TRUE
-monitor_control.disable_reloc = TRUE
-monitor_control.disable_btinout = TRUE
-monitor_control.disable_btmemspace = TRUE
-monitor_control.disable_btpriv = TRUE
-monitor_control.disable_btseg = TRUE
-```
-
-> **Note:** Disabling the VMware backdoor (`isolation.tools.*`) may break VMware Tools clipboard sharing and drag-and-drop. Hiding the CPUID hypervisor bit may interfere with Hyper-V enlightenments on nested guests.
-
-### Hiding the hypervisor in VirtualBox
-
-VirtualBox exposes similar settings via `VBoxManage`:
-
-```cmd
-REM Hide the hypervisor vendor CPUID leaf
-VBoxManage setextradata "<VM Name>" VBoxInternal/CPUM/EnableHVP 0
-
-REM Alternatively, mask CPUID leaf 0x80000002–0x80000004 (CPU brand)
-REM to avoid returning QEMU/VirtualBox strings
-VBoxManage modifyvm "<VM Name>" --cpuid-portability-level 1
-```
-
-Full masking of CPUID hypervisor presence is not possible in all VirtualBox versions; use an `--hwvirtex on` combined with `--paravirt-provider none` to suppress the standard Hyper-V interface:
-
-```cmd
-VBoxManage modifyvm "<VM Name>" --paravirt-provider none
-```
-
-## AvmProbeTest — Validation Probe
-
-`AvmProbeTest` is a lightweight console executable that checks whether common VM indicators are visible on the current machine and probes the AvmKernel driver, minifilter, and runtime shim.
-
-### Building
-
-`AvmProbeTest` is part of the solution and builds with everything else:
-
-```powershell
-.\build.ps1 -Configuration Release -Platform x64
-```
-
-Or build the **AvmProbeTest** project individually in Visual Studio (Release | x64).  
-The output is `probe\AvmProbeTest\x64\Release\AvmProbeTest.exe`.
-
-### Running
-
-```powershell
-# Basic run — prints results to the console
-.\AvmProbeTest.exe
-
-# Export results to JSON
-.\AvmProbeTest.exe results.json
-```
-
-Run as **Administrator** for full coverage — some checks (SCM service enumeration, kernel driver IOCTL) require elevation.
-
-### Checks Performed
-
-| # | Check | Category | What it means |
-|---|-------|----------|---------------|
-| 1 | **CPUID hypervisor bit** | CPUID | Leaf 1 ECX bit 31 — set by any hypervisor that advertises itself. |
-| 2 | **CPUID hypervisor vendor** | CPUID | Leaf 0x40000000 — returns "VMwareVMware", "Microsoft Hv", etc. |
-| 3 | **BIOS vendor** | BIOS/Registry | `HKLM\HARDWARE\DESCRIPTION\System\BIOS\BIOSVendor` — matches VM vendors. |
-| 4 | **System manufacturer** | BIOS/Registry | `SystemManufacturer` — "VMware, Inc.", "Microsoft Corporation", etc. |
-| 5 | **System product name** | BIOS/Registry | `SystemProductName` — "VMware Virtual Platform", "Virtual Machine", etc. |
-| 6 | **VMware registry keys** | Registry | Checks for VMware Tools, VGAuth, vmci, vmhgfs, vmmouse, VMTools service keys. |
-| 7 | **VMware services/drivers** | Services | Queries the SCM for vmci, vmhgfs, vmmouse, vmx\_svga, vmxnet, VMTools, etc. |
-| 8 | **VMware files** | Files | Looks for vmci.sys, vmhgfs.sys, vmtoolsd.exe, etc. on disk. |
-| 9 | **VMware directories** | Files | Checks for `C:\Program Files\VMware` and sub-directories. |
-| 10 | **VMware processes** | Processes | Enumerates running processes for vmtoolsd.exe, vmwaretray.exe, etc. |
-| 11 | **MAC address OUI** | Network | Scans adapters for VMware OUIs (00:0C:29, 00:50:56, 00:05:69). |
-| 12 | **VMware Tools installed** | VMware | Registry `InstallPath` under `VMware, Inc.\VMware Tools`. |
-| 13 | **Timing / sleep delta** | Timing | Sleeps 500 ms and measures actual elapsed time via QPC; flags deviation > 50%. |
-| 14 | **AvmKernel driver** | Driver | Opens `\\.\AvmKernel` and issues `IOCTL_GET_STATUS` to read the status snapshot. |
-| 15 | **Minifilter path probe** | Minifilter | Opens a known VM artifact path; if the minifilter is hiding it the open will fail even though the file exists. |
-| 16 | **Minifilter directory enum** | Minifilter | Enumerates `C:\Program Files\VMware\*`; the minifilter's directory filter may remove entries. |
-| 17 | **Runtime shim DLL** | RuntimeShim | Checks whether `AvmRuntimeShim.dll` exists in expected locations. Shim hooks can only be observed from inside an injected target process. |
-
-### Using AvmProbeTest to Validate Platform Components
-
-**Kernel driver (`AvmKernel`)**  
-Load the driver, then run `AvmProbeTest`. Check #14 should report `DETECTED` with the current policy snapshot. If the driver is not loaded it reports `NOT DETECTED`.
-
-**Minifilter (`AvmMiniFilter`)**  
-Load the minifilter and add a hide rule for a VM artifact path (e.g., `C:\Program Files\VMware\VMware Tools\vmtoolsd.exe`). Run `AvmProbeTest` — check #15 should show that CreateFile was blocked while GetFileAttributes still sees the file (indicating minifilter intervention). Check #16 should show fewer directory entries if the filter is removing them.
-
-**Controller (`AvmController`)**  
-Use the controller GUI to configure policy, add targets, and toggle countermeasures. Re-run `AvmProbeTest` to verify that the kernel driver status snapshot (check #14) reflects the policy you configured.
-
-**Runtime shim (`AvmRuntimeShim`)**  
-The shim hooks APIs inside the injected target process; `AvmProbeTest` cannot directly observe those hooks from outside. Check #17 reports whether the DLL file exists. To validate shim behavior, inject it into a target process and observe telemetry through the controller or the kernel driver's event queue.
+For prompt information, refer to [PROJECT_SPEC.md](PROJECT_SPEC.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), and [prompt.txt](prompt.txt).

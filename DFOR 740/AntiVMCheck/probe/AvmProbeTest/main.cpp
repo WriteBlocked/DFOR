@@ -10,11 +10,8 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
 #include <Windows.h>
 #include <winioctl.h>
-#include <iphlpapi.h>
-#include <ws2ipdef.h>
 #include <tlhelp32.h>
 #include <intrin.h>
 #include <stdio.h>
@@ -27,9 +24,8 @@
 
 #include "avm_shared.h"
 
-#pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "advapi32.lib")
-#pragma comment(lib, "ws2_32.lib")
+#include <winsvc.h>
 
 /* ------------------------------------------------------------------ */
 /*  Result types                                                       */
@@ -525,49 +521,6 @@ static void CheckVBoxProcesses()
 }
 
 /* ------------------------------------------------------------------ */
-/*  MAC address OUI                                                    */
-/* ------------------------------------------------------------------ */
-
-static void CheckMacAddressOui()
-{
-    ULONG bufSize = 0;
-    GetAdaptersAddresses(AF_UNSPEC, 0, NULL, NULL, &bufSize);
-    if (bufSize == 0) {
-        AddCheck("MAC address OUI", "Network", PROBE_ERROR, "No adapters");
-        return;
-    }
-    std::vector<BYTE> raw(bufSize);
-    PIP_ADAPTER_ADDRESSES addrs = (PIP_ADAPTER_ADDRESSES)raw.data();
-    if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, addrs, &bufSize) != NO_ERROR) {
-        AddCheck("MAC address OUI", "Network", PROBE_ERROR,
-                 "GetAdaptersAddresses failed");
-        return;
-    }
-    int found = 0;
-    std::string detail;
-    for (PIP_ADAPTER_ADDRESSES a = addrs; a; a = a->Next) {
-        if (a->PhysicalAddressLength < 3) continue;
-        BYTE* m = a->PhysicalAddress;
-        bool isVmware = (m[0]==0x00 && m[1]==0x0C && m[2]==0x29) ||
-                        (m[0]==0x00 && m[1]==0x50 && m[2]==0x56) ||
-                        (m[0]==0x00 && m[1]==0x05 && m[2]==0x69) ||
-                        (m[0]==0x00 && m[1]==0x1C && m[2]==0x14);
-        bool isVBox = (m[0]==0x08 && m[1]==0x00 && m[2]==0x27);
-        if (isVmware || isVBox) {
-            found++;
-            char ms[24];
-            sprintf_s(ms, "%02X:%02X:%02X:%02X:%02X:%02X",
-                      m[0],m[1],m[2],m[3],m[4],m[5]);
-            if (!detail.empty()) detail += ", ";
-            detail += ms;
-        }
-    }
-    AddCheck("MAC address OUI (VM)", "Network",
-             found > 0 ? DETECTED : NOT_DETECTED,
-             found > 0 ? detail.c_str() : "no VMware/VirtualBox OUI found");
-}
-
-/* ------------------------------------------------------------------ */
 /*  VMware Tools installed (registry)                                  */
 /* ------------------------------------------------------------------ */
 
@@ -912,6 +865,181 @@ static void CheckBiosSerial()
 }
 
 /* ------------------------------------------------------------------ */
+/*  Shim hook validation (FindFirstFile, EnumServices, devices, SMBIOS)*/
+/* ------------------------------------------------------------------ */
+
+static void CheckFindFirstFileHiding()
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+
+    /* Wildcard: VBox*.sys */
+    bool vboxWild = false;
+    h = FindFirstFileW(L"C:\\Windows\\System32\\drivers\\VBox*.sys", &fd);
+    if (h != INVALID_HANDLE_VALUE) { vboxWild = true; FindClose(h); }
+
+    /* Wildcard: vm*.sys — check only for known vm-specific filenames */
+    bool vmWild = false;
+    h = FindFirstFileW(L"C:\\Windows\\System32\\drivers\\vm*.sys", &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            wchar_t lo[MAX_PATH] = {};
+            wcsncpy_s(lo, fd.cFileName, _TRUNCATE);
+            for (int ci = 0; lo[ci]; ++ci) lo[ci] = (wchar_t)towlower(lo[ci]);
+            if (wcsstr(lo, L"vmmouse") || wcsstr(lo, L"vmhgfs") ||
+                wcsstr(lo, L"vmci")    || wcsstr(lo, L"vm3dmp") ||
+                wcsstr(lo, L"vmxnet"))
+            { vmWild = true; }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+
+    /* Direct GetFileAttributesW */
+    bool vmmAttr  = GetFileAttributesW(L"C:\\Windows\\System32\\drivers\\vmmouse.sys")  != INVALID_FILE_ATTRIBUTES;
+    bool vmhAttr  = GetFileAttributesW(L"C:\\Windows\\System32\\drivers\\vmhgfs.sys")   != INVALID_FILE_ATTRIBUTES;
+    bool vbgAttr  = GetFileAttributesW(L"C:\\Windows\\System32\\drivers\\VBoxGuest.sys")!= INVALID_FILE_ATTRIBUTES;
+
+    bool anyFound = vboxWild || vmWild || vmmAttr || vmhAttr || vbgAttr;
+    char det[400];
+    snprintf(det, sizeof(det),
+        "VBox*.sys wildcard=%s vm*.sys wildcard=%s | attrs: vmmouse=%s vmhgfs=%s VBoxGuest=%s",
+        vboxWild ? "FOUND" : "hidden",
+        vmWild   ? "FOUND" : "hidden",
+        vmmAttr  ? "VISIBLE" : "hidden",
+        vmhAttr  ? "VISIBLE" : "hidden",
+        vbgAttr  ? "VISIBLE" : "hidden");
+    AddCheck("FindFirstFile driver hiding", "ShimHooks", anyFound ? DETECTED : NOT_DETECTED, det);
+}
+
+static void CheckEnumServicesFiltering()
+{
+    SC_HANDLE hSCM = OpenSCManager(nullptr, nullptr, SC_MANAGER_ENUMERATE_SERVICE);
+    if (!hSCM) {
+        AddCheck("EnumServices VM filtering", "ShimHooks", PROBE_ERROR, "OpenSCManager failed");
+        return;
+    }
+
+    DWORD needed = 0, returned = 0, resume = 0;
+    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO,
+        SERVICE_WIN32 | SERVICE_DRIVER, SERVICE_STATE_ALL,
+        nullptr, 0, &needed, &returned, &resume, nullptr);
+
+    if (needed == 0) {
+        CloseServiceHandle(hSCM);
+        AddCheck("EnumServices VM filtering", "ShimHooks", PROBE_ERROR, "EnumServicesStatusExW: no size returned");
+        return;
+    }
+
+    std::vector<BYTE> buf(needed + 4096);
+    needed = 0; returned = 0; resume = 0;
+    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO,
+        SERVICE_WIN32 | SERVICE_DRIVER, SERVICE_STATE_ALL,
+        buf.data(), (DWORD)buf.size(), &needed, &returned, &resume, nullptr);
+    CloseServiceHandle(hSCM);
+
+    static const wchar_t* const kVmSvc[] = {
+        L"vmci", L"vmhgfs", L"vmmouse", L"VMTools", L"vmvss",
+        L"vm3dmp", L"vmrawdsk", L"vmusbmouse",
+        L"VBoxGuest", L"VBoxMouse", L"VBoxSF", L"VBoxVideo", L"VBoxWddm",
+        nullptr
+    };
+
+    auto* arr = (ENUM_SERVICE_STATUS_PROCESSW*)buf.data();
+    std::vector<std::string> found;
+    for (DWORD i = 0; i < returned; ++i) {
+        if (!arr[i].lpServiceName) continue;
+        for (int j = 0; kVmSvc[j]; ++j) {
+            if (_wcsicmp(arr[i].lpServiceName, kVmSvc[j]) == 0) {
+                found.push_back(WideToUtf8(arr[i].lpServiceName));
+                break;
+            }
+        }
+    }
+
+    if (found.empty()) {
+        char det[128];
+        snprintf(det, sizeof(det), "0 VM services visible among %u enumerated", returned);
+        AddCheck("EnumServices VM filtering", "ShimHooks", NOT_DETECTED, det);
+    } else {
+        std::string names;
+        for (size_t i = 0; i < found.size(); ++i) { if (i) names += ", "; names += found[i]; }
+        AddCheck("EnumServices VM filtering", "ShimHooks", DETECTED, names.c_str());
+    }
+}
+
+static void CheckPseudoDevices()
+{
+    static const struct { const wchar_t* path; const char* name; } kDev[] = {
+        { L"\\\\.\\HGFS",          "HGFS"          },
+        { L"\\\\.\\vmci",          "vmci"          },
+        { L"\\\\.\\VBoxGuest",     "VBoxGuest"     },
+        { L"\\\\.\\VBoxMiniRdrDN", "VBoxMiniRdrDN" },
+        { nullptr, nullptr }
+    };
+    std::vector<std::string> found;
+    for (int i = 0; kDev[i].path; ++i) {
+        HANDLE h = CreateFileW(kDev[i].path, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (h != INVALID_HANDLE_VALUE) {
+            found.push_back(kDev[i].name);
+            CloseHandle(h);
+        }
+    }
+    if (found.empty()) {
+        AddCheck("VM pseudo-devices", "ShimHooks", NOT_DETECTED, "no VM pseudo-devices accessible");
+    } else {
+        std::string names;
+        for (size_t i = 0; i < found.size(); ++i) { if (i) names += ", "; names += found[i]; }
+        AddCheck("VM pseudo-devices", "ShimHooks", DETECTED, names.c_str());
+    }
+}
+
+static void CheckFirmwareTable()
+{
+    UINT sz = GetSystemFirmwareTable('RSMB', 0, nullptr, 0);
+    if (sz == 0) {
+        AddCheck("Firmware table VM strings", "ShimHooks", PROBE_ERROR,
+                 "GetSystemFirmwareTable unsupported or empty");
+        return;
+    }
+    std::vector<BYTE> buf(sz);
+    UINT written = GetSystemFirmwareTable('RSMB', 0, buf.data(), sz);
+    if (written == 0) {
+        AddCheck("Firmware table VM strings", "ShimHooks", PROBE_ERROR, "SMBIOS read failed");
+        return;
+    }
+
+    static const char* const kVmStr[] = { "VMware", "VirtualBox", "VBox", "VBOX", nullptr };
+    std::vector<std::string> found;
+    const char* raw = (const char*)buf.data();
+    for (UINT i = 0; i < written; ) {
+        bool hit = false;
+        for (int k = 0; kVmStr[k]; ++k) {
+            size_t flen = strlen(kVmStr[k]);
+            if (i + flen > written) continue;
+            if (_strnicmp(raw + i, kVmStr[k], flen) == 0) {
+                found.push_back(std::string(kVmStr[k]) + "@" + std::to_string(i));
+                i += (UINT)flen;
+                hit = true;
+                break;
+            }
+        }
+        if (!hit) ++i;
+    }
+
+    if (found.empty()) {
+        char det[128];
+        snprintf(det, sizeof(det), "no VM strings in %u-byte SMBIOS table", written);
+        AddCheck("Firmware table VM strings", "ShimHooks", NOT_DETECTED, det);
+    } else {
+        std::string locs;
+        for (size_t i = 0; i < found.size() && i < 6; ++i) { if (i) locs += "; "; locs += found[i]; }
+        if (found.size() > 6) locs += "...";
+        AddCheck("Firmware table VM strings", "ShimHooks", DETECTED, locs.c_str());
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Runtime shim status                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1076,7 +1204,6 @@ int main(int argc, char** argv)
     CheckVBoxDirectories();
     CheckVmwareProcesses();
     CheckVBoxProcesses();
-    CheckMacAddressOui();
     CheckVmwareToolsInstalled();
     CheckVBoxGuestAdditions();
     CheckTimingDelta();
@@ -1084,10 +1211,12 @@ int main(int argc, char** argv)
     CheckUserActivity();
     CheckWmiHardwareIdentity();
     CheckBiosSerial();
-    CheckKernelDriver();
     CheckMinifilterPathProbe();
     CheckMinifilterDirEnum();
-    CheckRuntimeShimStatus();
+    CheckFindFirstFileHiding();
+    CheckEnumServicesFiltering();
+    CheckPseudoDevices();
+    CheckFirmwareTable();
 
     PrintResults();
 
