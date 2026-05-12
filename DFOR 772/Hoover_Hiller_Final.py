@@ -6,9 +6,13 @@ __artifacts_v2__ = {
         "version": "0.1",
         "date": "2026-04-13",
         "requirements": "none",
-        "category": "Telegram - Messages",
+        "category": "Telegram",
+        "artifact_icon": "message-circle",
         "notes": "",
-        "paths": ('*/org.telegram.messenger/files/cache4.db*',),
+        "paths": (
+            '*/org.telegram.messenger/files/cache4.db*',
+            '*/org.telegram.messenger/files/account*/cache4.db*',
+        ),
         "function": "get_telegram_cache4_messages"
     },
     "telegram_user_preferences": {
@@ -18,7 +22,8 @@ __artifacts_v2__ = {
         "version": "0.1",
         "date": "2026-04-10",
         "requirements": "none",
-        "category": "Telegram - User Prefs",
+        "category": "Telegram",
+        "artifact_icon": "settings",
         "notes": "",
         "paths": (
             '*/org.telegram.messenger/shared_prefs/userconfing.xml',
@@ -29,10 +34,6 @@ __artifacts_v2__ = {
 }
 
 """
-This is a Telegram Parser for Android. It is made by Hiller Hoover for DFOR 772 in the Spring 2026 semester at GMU.
-This file is a duplicate of the latest version, available at: 
-https://github.com/WriteBlocked/ALEAPP/blob/telegram-parser/scripts/artifacts/Telegram.py
-
 Version history:
 
 4/6/2026: Cloned aLEAPP, set up pycharm for editing. started creating functions.
@@ -40,13 +41,9 @@ Version history:
 4/9/2026: added helper functions for TLObject parsing.
 4/13/2026: Improved SQLite query logic
 4/14/2026: deduplicated some functionality and created new helper functions.
-4/20/2026: Implemented AI to improve blob parsing logic and implement version checking.
 
 TODO:
-improve blob parsing
-figure out what version of telegram this works with.
-    case switch at beginning to output warning to ALEAPP report for unsupported versions.
-
+Add more compatible versions of Telegram. This version works for build 42832 and should work for most others.
 
 NOTE:
 this parser only supports one user, the active one. 
@@ -58,18 +55,16 @@ I can add more upon request if necessary.
 from datetime import datetime, timezone, timedelta
 import argparse
 import sqlite3
-import hashlib
 import base64
 import xml.etree.ElementTree as ET
 import io
 import struct
 import os
-import sys
 import re
 import html
 
 try:
-    from scripts.ilapfuncs import logfunc, tsv, timeline, open_sqlite_db_readonly, does_column_exist_in_db, media_to_html
+    from scripts.ilapfuncs import logfunc, tsv, timeline, open_sqlite_db_readonly, does_column_exist_in_db, media_to_html, icons
     from scripts.artifact_report import ArtifactHtmlReport
     from scripts.filetype import types
     import scripts.ilapfuncs
@@ -88,9 +83,6 @@ except ImportError:
 
     def media_to_html(file_name, media_files, report_folder):
         return html.escape(file_name or "")
-
-# not sure if I'm going to use Telethon. It doesn't seem to have the most modern constructors.
-# Telethon dependency removed; all TL decoding is now done by the stdlib-only TLReader class below.
 
 # Telegram build support is intentionally conservative for now.
 # The parser will still attempt untested builds, but ALEAPP output will warn
@@ -1721,8 +1713,20 @@ def parse_telegram_calls(cache4db_path, rows, voip_log_paths):
     return calls
 
 
-def write_simple_table_report(report_folder, report_name, data_headers, data_list, source_text, html_escape=True, description=""):
+def write_simple_table_report(
+    report_folder,
+    report_name,
+    data_headers,
+    data_list,
+    source_text,
+    html_escape=True,
+    description="",
+    category="Telegram",
+    artifact_icon="file-text",
+):
     """Small helper for writing ALEAPP HTML + TSV + timeline with a concise source string."""
+    icons.setdefault(category, {}).update({report_name: artifact_icon})
+
     report = ArtifactHtmlReport(report_name)
     report.start_artifact_report(report_folder, report_name, description)
     report.add_script()
@@ -1792,6 +1796,11 @@ def get_telegram_cache4_messages(files_found, report_folder, seeker, wrap_text):
             data_list,
             message_source,
             html_escape=True,
+            artifact_icon={
+                "Messages": "message-circle",
+                "Group Messages": "users",
+                "Channel Messages": "radio",
+            }.get(report_name, "message-circle"),
         )
         timeline(report_folder, report_name, data_list, data_headers)
         logfunc(f"{report_name}: {len(data_list)} records")
@@ -1818,6 +1827,7 @@ def get_telegram_cache4_messages(files_found, report_folder, seeker, wrap_text):
         media_source,
         html_escape=False,
         description="Telegram media cache files found on disk.",
+        artifact_icon="image",
     )
     logfunc(f"Media: {len(media_cache_rows)} records")
 
@@ -1840,7 +1850,15 @@ def get_telegram_cache4_messages(files_found, report_folder, seeker, wrap_text):
     call_source = summarize_source_locations(
         "Telegram VoIP logs: */org.telegram.messenger/cache/voip_logs/*.log",
     )
-    write_simple_table_report(report_folder, "Calls", call_headers, call_rows, call_source, html_escape=True)
+    write_simple_table_report(
+        report_folder,
+        "Calls",
+        call_headers,
+        call_rows,
+        call_source,
+        html_escape=True,
+        artifact_icon="phone-call",
+    )
     logfunc(f"Calls: {len(call_rows)} records")
 
     contacts_headers = (
@@ -1857,7 +1875,15 @@ def get_telegram_cache4_messages(files_found, report_folder, seeker, wrap_text):
         "Telegram contacts DB: */org.telegram.messenger/files/cache4.db",
         "Telegram avatar cache: */org.telegram.messenger/cache/*",
     )
-    write_simple_table_report(report_folder, "Contacts", contacts_headers, contacts_rows, contacts_source, html_escape=False)
+    write_simple_table_report(
+        report_folder,
+        "Contacts",
+        contacts_headers,
+        contacts_rows,
+        contacts_source,
+        html_escape=False,
+        artifact_icon="user",
+    )
     logfunc(f"Contacts: {len(contacts_rows)} records")
 
 
@@ -2019,6 +2045,7 @@ def get_telegram_user_preferences(files_found, report_folder, seeker, wrap_text)
         logfunc("No Telegram user preference data found")
         return
 
+    icons.setdefault("Telegram", {}).update({"User Prefs": "settings"})
     report = ArtifactHtmlReport("User Prefs")
     report.start_artifact_report(report_folder, "User Prefs")
     report.add_script()
@@ -2236,6 +2263,7 @@ if __name__ == '__main__':
         return counts
 
     def debug_cache4_rows(cache4db_path, limit=20, only_with_text=False):
+        # shouldn't be needed anymore. only used to debug logic issues, but I'm keeping it in just in case.
         rows = parse_cache4db(cache4db_path)
         shown = 0
 
@@ -2299,9 +2327,7 @@ if __name__ == '__main__':
         """
         Standalone test runner — validates TL decoding without launching ALEAPP.
         Run with:
-            python PATH\Telegram.py --cache4db "D:\\path\\to\\cache4.db" --userconfig "D:\\path\\to\\userconfing.xml" --output "D:\\path\\to\\telegram_sample.html"
-        It can also be run from an interactive terminal and can be provided with paths.
-        The media portion isn't currently working, but I don't think it's important to fix.
+            python scripts\\artifacts\\Telegram.py --cache4db "D:\\path\\to\\cache4.db" --userconfig "D:\\path\\to\\userconfing.xml" --output "D:\\path\\to\\telegram_sample.html"
         """
         parser = argparse.ArgumentParser(description="Standalone Telegram parser test for ALEAPP development.")
         parser.add_argument("--cache4db", help="Path to Telegram cache4.db")
