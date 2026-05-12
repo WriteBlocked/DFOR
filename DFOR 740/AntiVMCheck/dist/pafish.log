@@ -1,0 +1,15 @@
+
+[pafish] Start
+[pafish] Windows version: 6.2 build 9200 (native)
+[pafish] CPU: AuthenticAMD (HV: Microsoft Hv) AMD Ryzen 5 7600X 6-Core Processor             
+[pafish] CPU VM traced by checking the difference between CPU timestamp counters (rdtsc) forcing VM exit
+[pafish] CPU VM traced by checking hypervisor bit in cpuid feature bits
+[pafish] CPU VM traced by checking cpuid hypervisor vendor for known VM vendors
+[pafish] Sandbox traced by missing mouse click activity
+[pafish] Sandbox traced by missing double click activity
+[pafish] Sandbox traced by missing dialog confirmation
+[pafish] Sandbox traced by missing or implausible dialog confirmation
+[pafish] VMware traced using MAC address starting with 00:05:69, 00:0C:29, 00:1C:14 or 00:50:56
+[pafish] VMware traced using network adapter name
+[pafish] VMWare traced using device \\.\vmci
+[pafish] End
